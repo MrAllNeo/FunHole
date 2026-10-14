@@ -25,6 +25,7 @@
   </div>
 
   <div id="combo"></div>
+  <div id="warn"></div>
 
   <div id="banner">
     <div class="big">SIZE UP!</div>
@@ -40,9 +41,11 @@
       <ul class="how">
         <li class="only-desktop">🖱️ Fareyle yönlendir (ya da WASD / oklar)</li>
         <li class="only-touch">👆 Ekranda parmağını sürükle</li>
-        <li>🪨 Senden küçük olan her şeyi yutabilirsin</li>
+        <li>🪨 Senden küçük olan her şeyi yut, <b>SIZE UP</b> al</li>
         <li>🔴 Kırmızı halkalılar senden büyük… şimdilik!</li>
-        <li>⬆️ Yedikçe <b>SIZE UP</b> al, daha büyük şeyler ye</li>
+        <li>🕳️ Rakip kara delikler: küçükse ye, büyükse kaç!</li>
+        <li>⚡ Lazer uydular ve süpernovalar seni küçültür</li>
+        <li>☢️ Uzun süre yemezsen buharlaşırsın</li>
         <li>🌌 Hedef: galaksileri yutup evrenin sonu olmak</li>
       </ul>
       <button id="startBtn" class="btn">BAŞLA</button>
@@ -58,6 +61,16 @@
       <p id="winStats"></p>
       <button id="continueBtn" class="btn">Devam Et</button>
       <button id="againBtn" class="btn ghost">Yeniden Başla</button>
+    </div>
+  </div>
+
+  <div id="dead" class="overlay">
+    <div class="card">
+      <div class="logo dead"></div>
+      <h1>YUTULDUN!</h1>
+      <p class="tag" id="deadBy"></p>
+      <p id="deadStats"></p>
+      <button id="retryBtn" class="btn">Tekrar Dene</button>
     </div>
   </div>
 

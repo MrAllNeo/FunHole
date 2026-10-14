@@ -101,6 +101,23 @@ html, body {
 }
 #combo.show { opacity: 1; }
 
+#warn {
+  position: fixed;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 22px);
+  left: 16px;
+  right: 16px;
+  text-align: center;
+  font-weight: 800;
+  font-size: 15px;
+  color: #ffd0d0;
+  text-shadow: 0 0 10px rgba(255, 40, 40, .9), 0 1px 3px #000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s;
+}
+#warn.show { opacity: 1; animation: warnPulse .8s ease-in-out infinite alternate; }
+@keyframes warnPulse { to { transform: scale(1.06); } }
+
 /* ---------- SIZE UP banner ---------- */
 #banner {
   position: fixed;
@@ -215,8 +232,13 @@ h1 {
   box-shadow: none;
 }
 
-#best, #winStats { font-size: 13px; opacity: .75; margin: 12px 0 0; white-space: pre-line; }
-#winStats { font-size: 15px; opacity: .9; margin-bottom: 10px; }
+.logo.dead {
+  background: radial-gradient(circle, #000 0 38%, #e6c8ff 40%, #a064ff 46%, rgba(255, 60, 120, .5) 60%, transparent 72%);
+  box-shadow: 0 0 40px rgba(160, 90, 255, .4);
+}
+
+#best, #winStats, #deadStats { font-size: 13px; opacity: .75; margin: 12px 0 0; white-space: pre-line; }
+#winStats, #deadStats { font-size: 15px; opacity: .9; margin-bottom: 10px; }
 
 .only-touch { display: none; }
 @media (pointer: coarse) {

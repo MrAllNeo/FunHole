@@ -6,7 +6,9 @@
   // =====================================================================
   const TAU = Math.PI * 2;
   const EAT_RATIO = 0.9;     // deliğin yarıçapının bu oranından küçükler yenebilir
-  const GROW = 0.6;          // yutulan alanın ne kadarı deliğe eklenir
+  const GROW = 0.5;          // yutulan alanın ne kadarı deliğe eklenir
+  const HAWKING_DELAY = 3;   // bu kadar saniye bir şey yemezsen buharlaşmaya başlarsın
+  const HAWKING_RATE = 0.03; // buharlaşırken saniyede yarıçap kaybı oranı
   const COMBO_TIME = 1.4;    // kombo zinciri için saniye
   const JOY_R = 60;          // dokunmatik joystick yarıçapı (px)
   const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","Twemoji Mozilla",sans-serif';
@@ -41,7 +43,7 @@
     { id: 'rocket',   emoji: '🚀',     name: 'Roket',           min: 2,    max: 5,    w: 0.8, spin: 0.5,  col: '#ffb070' },
     { id: 'ufo',      emoji: '🛸',     name: 'Uzaylı Aracı',    min: 3,    max: 12,   w: 0.8, spin: 0.6,  col: '#a8ffb0' },
     { id: 'station',  kind: 'station', name: 'Uzay İstasyonu',  min: 5,    max: 18,   w: 1,   spin: 0.2,  col: '#cfe0ff' },
-    { id: 'laser',    kind: 'laser',   name: 'Dev Lazer Uydu',  min: 6,    max: 16,   w: 0.7, spin: 0.25, col: '#ff5a5a' },
+    { id: 'laser',    kind: 'laser',   name: 'Dev Lazer Uydu',  min: 6,    max: 16,   w: 0,   spin: 0.25, col: '#ff5a5a' },
     { id: 'bigrock',  kind: 'rock',    name: 'Dev Asteroit',    min: 8,    max: 30,   w: 1,   spin: 0.2,  col: '#b9a690' },
     { id: 'comet',    kind: 'comet',   name: 'Kuyruklu Yıldız', min: 10,   max: 35,   w: 0.6, spin: 0,    col: '#bfe4ff' },
     { id: 'moon',     kind: 'moon',    name: 'Ay',              min: 20,   max: 60,   w: 1,   spin: 0.1,  col: '#dddddd' },
@@ -525,20 +527,41 @@
     [392, 523, 659, 784, 1047].forEach((f, i) => tone('triangle', f, f, 0.25, 0.12, i * 0.08));
   }
 
+  function hurtSound() { tone('sawtooth', 420, 70, 0.4, 0.12); }
+  function laserChargeSound() { tone('sine', 300, 1100, 1.1, 0.035); }
+  function laserFireSound() { tone('square', 900, 120, 0.3, 0.05); }
+  function boomSound() {
+    tone('triangle', 90, 25, 0.9, 0.3);
+    tone('sawtooth', 200, 40, 0.5, 0.07);
+  }
+  function rivalEatSound() {
+    tone('sine', 300, 60, 0.45, 0.25);
+    [523, 659, 784].forEach((f, i) => tone('triangle', f, f, 0.18, 0.08, 0.1 + i * 0.07));
+  }
+  function deathSound() { tone('sawtooth', 500, 40, 1.2, 0.18); }
+
+  function vibrate(p) {
+    if (navigator.vibrate) { try { navigator.vibrate(p); } catch (e) { /* yok say */ } }
+  }
+
   // =====================================================================
   //  Oyun durumu
   // =====================================================================
-  let state = 'menu';           // menu | play | won
+  let state = 'menu';           // menu | play | dead | won
   let time = 0;                 // toplam geçen süre (animasyon)
   let playTime = 0;
   let hole, cam, zoom, level, score, objs, eaten, particles, popups, waves, combo, eatenCount, endless;
+  let rivals, turrets, novas, spawnT, shake, deathBy;
+  let shakeX = 0, shakeY = 0;
 
   const baseScreenR = () => Math.min(W, H) * 0.05;
   const zoomTarget = () => baseScreenR() / LEVELS[level].r;
   const targetCount = () => Math.round(clamp((W * H) / 5000, 110, 180));
+  const baseSpeed = () => (Math.min(W, H) * 0.6) / zoom;  // oyuncunun azami hızı (dünya birimi/sn)
+  const minHoleR = () => LEVELS[level].r * 0.6;           // küçülmenin alt sınırı (seviye asla düşmez)
 
   function reset() {
-    hole = { x: 0, y: 0, r: 1, dr: 1, vx: 0, vy: 0, pulse: 0 };
+    hole = { x: 0, y: 0, r: 1, dr: 1, vx: 0, vy: 0, kx: 0, ky: 0, pulse: 0, inv: 0, hurt: 0, idle: 0, dead: false };
     cam = { x: 0, y: 0 };
     level = 0;
     zoom = zoomTarget();
@@ -551,6 +574,12 @@
     particles = [];
     popups = [];
     waves = [];
+    rivals = [];
+    turrets = [];
+    novas = [];
+    spawnT = { rival: 2.5, turret: 5, nova: 10 };
+    shake = 0;
+    deathBy = '';
     combo = { n: 0, t: 0 };
     const hd = halfDiag(zoom);
     for (let i = 0; i < targetCount() * 1.5 && objs.length < targetCount(); i++) spawnObject(hd * 0.15, hd * 1.4);
@@ -559,6 +588,11 @@
 
   // Ekranın yarı köşegeni, dünya biriminde
   const halfDiag = (z) => Math.hypot(W, H) / 2 / z;
+
+  function onScreen(o, margin = 0) {
+    const p = w2s(o.x, o.y), m = o.r * zoom + margin;
+    return p.x > -m && p.x < W + m && p.y > -m && p.y < H + m;
+  }
 
   function pickSize() {
     const r = hole.r;
@@ -602,6 +636,7 @@
       sp: getSprite(t),
       fade: 0,
       bump: 0,
+      gone: false,
     });
   }
 
@@ -609,32 +644,95 @@
     return Math.min(5, 1 + Math.floor(combo.n / 5) * 0.5);
   }
 
-  function eat(o) {
+  // Küçük cismi kendine doğru çeker
+  function attract(o, host, dt, strength) {
+    const dx = host.x - o.x, dy = host.y - o.y, d = Math.hypot(dx, dy) || 1e-6;
+    const pullR = host.r * 2.8;
+    if (d >= pullR) return d;
+    const f = 1 - d / pullR;
+    const acc = host.r * (strength * f * f + 1.5 * f);
+    o.vx += (dx / d) * acc * dt;
+    o.vy += (dy / d) * acc * dt;
+    const damp = 1 - Math.min(1, dt * 2 * f);
+    o.vx *= damp;
+    o.vy *= damp;
+    return d;
+  }
+
+  // Oyuncu büyük bir cisme çarparsa geri itilir
+  function pushHoleFrom(o, playing) {
+    const dx = hole.x - o.x, dy = hole.y - o.y, d = Math.hypot(dx, dy) || 1e-6;
+    const minD = hole.r + o.r * 0.85;
+    if (d >= minD) return;
+    const nx = dx / d, ny = dy / d;
+    hole.x += nx * (minD - d);
+    hole.y += ny * (minD - d);
+    const vn = hole.vx * nx + hole.vy * ny;
+    if (vn < 0) {
+      hole.vx -= nx * vn * 1.3;
+      hole.vy -= ny * vn * 1.3;
+    }
+    o.bump = 0.5;
+    if (playing) bumpSound();
+  }
+
+  function swallowAnim(o, host, durMul = 1) {
+    const dx = o.x - host.x, dy = o.y - host.y;
+    eaten.push({ o, host, p: 0, dur: (0.35 + clamp(o.r / host.r, 0, 1) * 0.5) * durMul, ang: Math.atan2(dy, dx), d: Math.hypot(dx, dy) });
+  }
+
+  // Oyuncu bir şey yuttu (cisim, rakip, lazer uydu, süpernova)
+  function eat(o, bonus = 1, label = '') {
+    o.gone = true;
     const rel = o.r / hole.r;
     hole.r = Math.sqrt(hole.r * hole.r + o.r * o.r * GROW);
+    hole.idle = 0;
     hole.pulse = Math.min(1, hole.pulse + 0.15 + rel * 0.8);
     combo.n++;
     combo.t = COMBO_TIME;
-    const pts = Math.max(1, Math.round(o.r * o.r * 10 * comboMult()));
+    const pts = Math.max(1, Math.round(o.r * o.r * 10 * bonus * comboMult()));
     score += pts;
     eatenCount++;
+    swallowAnim(o, hole);
 
     const dx = o.x - hole.x, dy = o.y - hole.y;
-    eaten.push({ o, p: 0, dur: 0.35 + rel * 0.5, ang: Math.atan2(dy, dx), d: Math.hypot(dx, dy) });
-
-    const nP = 3 + Math.round(rel * 8);
+    const nP = 3 + Math.round(clamp(rel, 0, 1) * 8);
     for (let i = 0; i < nP; i++) {
       particles.push({ ang: Math.atan2(dy, dx) + rnd(-0.6, 0.6), d: Math.hypot(dx, dy) + o.r * rnd(0, 1.2), life: rnd(0.4, 0.8), t: 0, col: o.t.col });
     }
-    if (popups.length < 25 && (rel > 0.25 || Math.random() < 0.35)) {
-      popups.push({ x: o.x, y: o.y, text: '+' + fmtNum(pts), t: 0, big: rel > 0.6 });
+    if (label) {
+      popups.push({ x: o.x, y: o.y, text: `${label} +${fmtNum(pts)}`, t: 0, big: true, col: '#7dffa0' });
+      waves.push({ t: 0 });
+      rivalEatSound();
+    } else {
+      if (popups.length < 25 && (rel > 0.25 || Math.random() < 0.35)) {
+        popups.push({ x: o.x, y: o.y, text: '+' + fmtNum(pts), t: 0, big: rel > 0.6 });
+      }
+      gulpSound(rel);
     }
-    gulpSound(rel);
 
     while (level < LEVELS.length - 1 && hole.r >= LEVELS[level + 1].r) {
       level++;
       levelUp();
     }
+  }
+
+  // Oyuncu küçülür (lazer, süpernova)
+  function hurtPlayer(f, label) {
+    if (state !== 'play' || hole.inv > 0) return;
+    const before = hole.r;
+    hole.r = Math.max(minHoleR(), hole.r * f);
+    hole.inv = 1.2;
+    hole.hurt = 1;
+    shake = Math.max(shake, 0.5);
+    combo.n = 0;
+    for (let i = 0; i < 16; i++) {
+      particles.push({ ang: rnd(0, TAU), d: hole.r * 1.05, life: rnd(0.5, 0.9), t: 0, col: '#ff6a4a', out: true });
+    }
+    const lost = Math.round((1 - hole.r / before) * 100);
+    popups.push({ x: hole.x, y: hole.y - hole.r * 1.5, text: lost > 0 ? `${label} -%${lost}` : label, t: 0, big: true, col: '#ff6b6b' });
+    hurtSound();
+    vibrate(120);
   }
 
   function levelUp() {
@@ -647,25 +745,442 @@
     banner.classList.add('show');
     waves.push({ t: 0 });
     levelUpSound();
-    if (navigator.vibrate) { try { navigator.vibrate(60); } catch (e) { /* yok say */ } }
+    vibrate(60);
     if (level === LEVELS.length - 1 && !endless) setTimeout(win, 1600);
+  }
+
+  function hideHud() {
+    $('hud').classList.add('hidden');
+    $('combo').classList.remove('show');
+    $('warn').classList.remove('show');
+    delete hudCache.combo;
+    delete hudCache.warn;
+  }
+
+  function saveBest(finished) {
+    const best = store('funhole.best') || {};
+    const newTime = finished && (!best.time || playTime < best.time);
+    const newScore = score > (best.score || 0);
+    if (newTime) best.time = playTime;
+    if (newScore) best.score = score;
+    store('funhole.best', best);
+    return { newTime, newScore };
   }
 
   function win() {
     if (state !== 'play') return;
     state = 'won';
-    const best = store('funhole.best') || {};
-    const newTime = !best.time || playTime < best.time;
-    if (newTime) best.time = playTime;
-    best.score = Math.max(best.score || 0, score);
-    store('funhole.best', best);
+    const { newTime } = saveBest(true);
     $('winStats').textContent =
       `Süre: ${fmtTime(playTime)}${newTime ? '  🏆 Yeni rekor!' : ''}\n` +
       `Puan: ${fmtNum(score)}\nYutulan cisim: ${fmtNum(eatenCount)}`;
     $('win').classList.add('show');
-    $('hud').classList.add('hidden');
-    $('combo').classList.remove('show');
-    delete hudCache.combo;
+    hideHud();
+  }
+
+  function die(rv) {
+    state = 'dead';
+    hole.dead = true;
+    deathBy = rv.name;
+    swallowAnim({ x: hole.x, y: hole.y, r: hole.r, rot: 0, vr: 3, sp: rivalSprite([255, 150, 60]), t: { col: '#ffb070' } }, rv, 2.5);
+    rivalGrow(rv, hole.r);
+    shake = 1;
+    deathSound();
+    vibrate([80, 40, 220]);
+    hideHud();
+    setTimeout(showDead, 1500);
+  }
+
+  function showDead() {
+    if (state !== 'dead') return;
+    const { newScore } = saveBest(false);
+    $('deadBy').textContent = `${deathBy} seni yuttu.`;
+    $('deadStats').textContent =
+      `Ulaştığın seviye: ${level + 1} · ${LEVELS[level].name}\n` +
+      `Puan: ${fmtNum(score)}${newScore ? '  🏆 Yeni rekor!' : ''}\nSüre: ${fmtTime(playTime)}`;
+    $('dead').classList.add('show');
+  }
+
+  // =====================================================================
+  //  Rakip kara delikler (yapay zekâ)
+  // =====================================================================
+  //  Kural: yarıçapı diğerinin %90'ından küçük olan, büyüğün merkezine
+  //  girerse yutulur (oyuncu dahil). Benzer boydakiler birbirini iter.
+  //  Davranış: senden büyükse avlanır, küçükse kaçar, yoksa yem toplar.
+  const RIVAL_NAMES = ['Vakum', 'Kara Kurt', 'Obur', 'Girdap', 'Hiçlik', 'Kuyu', 'Açgözlü', 'Kaos', 'Gölge', 'Zifir'];
+  const RIVAL_COLS = [[160, 100, 255], [70, 200, 255], [90, 255, 170], [255, 90, 170], [255, 230, 100]];
+  // Seviyeye göre aynı anda en fazla kaç rakip / lazer uydu olabilir
+  const MAX_RIVALS = [1, 1, 2, 2, 2, 3, 3, 3, 4, 4];
+  const MAX_TURRETS = [0, 1, 1, 2, 2, 2, 3, 3, 3, 3];
+  const NOVA_FROM_LEVEL = 2;
+
+  const rivalSprites = new Map();
+  function rivalSprite(col) {
+    const key = col.join();
+    if (rivalSprites.has(key)) return rivalSprites.get(key);
+    const S = 96, { c, g } = mk(S), cx = S / 2, R = S * 0.28;
+    const gr = g.createRadialGradient(cx, cx, R * 0.9, cx, cx, S / 2);
+    gr.addColorStop(0, `rgba(${col},0.95)`);
+    gr.addColorStop(0.3, `rgba(${col},0.35)`);
+    gr.addColorStop(1, `rgba(${col},0)`);
+    g.fillStyle = gr;
+    g.fillRect(0, 0, S, S);
+    g.fillStyle = '#000';
+    g.beginPath(); g.arc(cx, cx, R, 0, TAU); g.fill();
+    const sp = { img: c, scale: S / (2 * R) };
+    rivalSprites.set(key, sp);
+    return sp;
+  }
+
+  function rivalPalette(col) {
+    const light = col.map((v) => Math.round(v + (255 - v) * 0.6)).join();
+    return {
+      c1: light,
+      c2: col.join(),
+      c3: col.map((v) => Math.round(v * 0.55)).join(),
+      c4: '40,20,80',
+      arc: (i) => `rgba(${col},${0.5 - i * 0.055})`,
+      ring: light,
+    };
+  }
+
+  function spawnRival(rel, distMul) {
+    const hd = halfDiag(zoom);
+    const a = rnd(0, TAU), d = hd * (distMul || rnd(1.15, 1.4));
+    if (!rel) {
+      const bigChance = level === 0 ? 0 : Math.min(0.5, 0.3 + level * 0.025);
+      rel = Math.random() < bigChance ? rnd(1.15, 1.6) : rnd(0.45, 0.8);
+    }
+    const used = new Set(rivals.map((r) => r.name));
+    const names = RIVAL_NAMES.filter((n) => !used.has(n));
+    const col = pick(RIVAL_COLS);
+    const r = hole.r * rel;
+    rivals.push({
+      x: hole.x + Math.cos(a) * d, y: hole.y + Math.sin(a) * d, r, dr: r, vx: 0, vy: 0,
+      name: names.length ? pick(names) : pick(RIVAL_NAMES),
+      col, pal: rivalPalette(col), sp: rivalSprite(col), t: { col: `rgb(${col})` },
+      rot: 0, vr: 3, spin: rnd(0, TAU), fade: 0, gone: false,
+      mode: 'roam', think: 0, huntT: 0, cd: 0, target: null, wander: rnd(0, TAU),
+    });
+  }
+
+  // Rakipler oyuncudan yavaş büyür ve belli bir oranı geçemez
+  // (1. seviyede rakip hiç senden büyük olamaz: önce yemeyi öğren)
+  const RIVAL_GROW = 0.3;
+  function rivalGrow(rv, r) {
+    const cap = hole.r * (level === 0 ? 0.85 : 1.7);
+    rv.r = Math.max(rv.r, Math.min(Math.sqrt(rv.r * rv.r + r * r * RIVAL_GROW), cap));
+  }
+
+  function rivalThink(rv, hd, playing) {
+    const dP = Math.hypot(hole.x - rv.x, hole.y - rv.y);
+    const sense = hd * 1.1;
+    const canEatPlayer = hole.r < rv.r * EAT_RATIO;
+    const playerCanEat = rv.r < hole.r * EAT_RATIO;
+    if (playing && canEatPlayer && dP < sense && rv.cd <= 0) {
+      if (rv.mode !== 'hunt') { rv.mode = 'hunt'; rv.huntT = 0; }
+      return;
+    }
+    if (playing && playerCanEat && dP < sense * 0.75) {
+      rv.mode = 'flee';
+      return;
+    }
+    rv.mode = 'roam';
+    // En iyi yemi seç: büyük ve yakın olan
+    let best = null, bs = 0;
+    for (const o of objs) {
+      if (o.r >= rv.r * EAT_RATIO) continue;
+      const d = Math.hypot(o.x - rv.x, o.y - rv.y);
+      if (d > hd * 1.2) continue;
+      const s = (o.r * o.r) / (d + rv.r * 3);
+      if (s > bs) { bs = s; best = o; }
+    }
+    for (const o of rivals) {
+      if (o === rv || o.r >= rv.r * EAT_RATIO) continue;
+      const d = Math.hypot(o.x - rv.x, o.y - rv.y);
+      const s = (o.r * o.r * 2) / (d + rv.r * 3);
+      if (s > bs) { bs = s; best = o; }
+    }
+    rv.target = best;
+  }
+
+  function updateRivals(dt, hd, playing) {
+    const spd = baseSpeed();
+    for (const rv of rivals) {
+      rv.fade = Math.min(1, rv.fade + dt * 1.5);
+      rv.spin += dt;
+      rv.cd = Math.max(0, rv.cd - dt);
+      rv.think -= dt;
+      if (rv.think <= 0) {
+        rv.think = rnd(0.2, 0.35);
+        rivalThink(rv, hd, playing);
+      }
+      let dirx = 0, diry = 0, s = 0;
+      const dx = hole.x - rv.x, dy = hole.y - rv.y, d = Math.hypot(dx, dy) || 1e-6;
+      if (rv.mode === 'hunt') {
+        // Oyuncunun gideceği yeri tahmin et
+        const lead = clamp(d / spd, 0, 0.7);
+        const tx = hole.x + hole.vx * lead - rv.x, ty = hole.y + hole.vy * lead - rv.y;
+        const td = Math.hypot(tx, ty) || 1e-6;
+        dirx = tx / td; diry = ty / td;
+        s = Math.min(0.9, 0.74 + level * 0.016);
+        rv.huntT += dt;
+        if (rv.huntT > 4 + level * 0.35) { rv.mode = 'roam'; rv.cd = rnd(3, 5); rv.target = null; }
+      } else if (rv.mode === 'flee') {
+        dirx = -dx / d; diry = -dy / d;
+        s = 0.82;
+      } else if (rv.target && !rv.target.gone) {
+        const tx = rv.target.x - rv.x, ty = rv.target.y - rv.y, td = Math.hypot(tx, ty) || 1e-6;
+        dirx = tx / td; diry = ty / td;
+        s = 0.55;
+      } else {
+        rv.wander += rnd(-2, 2) * dt;
+        dirx = Math.cos(rv.wander); diry = Math.sin(rv.wander);
+        s = 0.3;
+      }
+      const k = Math.min(1, dt * 3.5);
+      rv.vx += (dirx * s * spd - rv.vx) * k;
+      rv.vy += (diry * s * spd - rv.vy) * k;
+      rv.x += rv.vx * dt;
+      rv.y += rv.vy * dt;
+      rv.dr += (rv.r - rv.dr) * Math.min(1, dt * 6);
+    }
+  }
+
+  function rivalInteractions(dt, hd, playing) {
+    for (let i = rivals.length - 1; i >= 0; i--) {
+      const rv = rivals[i];
+      if (rv.gone) continue;
+      const dx = hole.x - rv.x, dy = hole.y - rv.y, d = Math.hypot(dx, dy) || 1e-6;
+      if (playing) {
+        if (rv.r < hole.r * EAT_RATIO) {
+          if (d < hole.r * 0.85) { eat(rv, 6, `${rv.name} yutuldu!`); continue; }
+        } else if (hole.r < rv.r * EAT_RATIO) {
+          if (d < rv.r * 0.85) { die(rv); return; }
+          // Büyük rakip oyuncuyu kendine çeker
+          const pr = rv.r * 3;
+          if (d < pr) {
+            const f = 1 - d / pr, ps = baseSpeed() * 0.35 * f * f;
+            hole.x -= (dx / d) * ps * dt;
+            hole.y -= (dy / d) * ps * dt;
+          }
+        } else {
+          const minD = (hole.r + rv.r) * 0.9;
+          if (d < minD) {
+            const m = (minD - d) / 2;
+            hole.x += (dx / d) * m; hole.y += (dy / d) * m;
+            rv.x -= (dx / d) * m; rv.y -= (dy / d) * m;
+            bumpSound();
+          }
+        }
+      }
+      // Rakipler birbirini de yiyebilir
+      for (let j = i - 1; j >= 0; j--) {
+        const b = rivals[j];
+        if (b.gone) continue;
+        const ex = b.x - rv.x, ey = b.y - rv.y, e = Math.hypot(ex, ey) || 1e-6;
+        const big = rv.r >= b.r ? rv : b, small = big === rv ? b : rv;
+        if (small.r < big.r * EAT_RATIO && e < big.r * 0.85) {
+          small.gone = true;
+          rivalGrow(big, small.r);
+          swallowAnim(small, big);
+          if (onScreen(big)) popups.push({ x: big.x, y: big.y - big.r * 2, text: `${big.name} yuttu: ${small.name}`, t: 0, big: true, col: '#ffb3b3' });
+          if (small === rv) break;
+        } else {
+          const minD = (rv.r + b.r) * 0.9;
+          if (e < minD) {
+            const m = (minD - e) / 2;
+            rv.x -= (ex / e) * m; rv.y -= (ey / e) * m;
+            b.x += (ex / e) * m; b.y += (ey / e) * m;
+          }
+        }
+      }
+    }
+    for (let i = rivals.length - 1; i >= 0; i--) {
+      const rv = rivals[i];
+      const far = Math.hypot(rv.x - cam.x, rv.y - cam.y) > hd * 2.6;
+      if (rv.gone || far || rv.r < hole.r * 0.12) {
+        rv.gone = true;
+        rivals.splice(i, 1);
+      }
+    }
+  }
+
+  // =====================================================================
+  //  Tehlikeler: lazer uydular ve süpernovalar
+  // =====================================================================
+  const LASER_T = TYPES.find((t) => t.id === 'laser');
+  const STAR_T = TYPES.find((t) => t.id === 'star');
+  const CHARGE_TIME = 1.15, FIRE_TIME = 0.35, BLAST_TIME = 0.7;
+
+  function turnTo(a, b, k) {
+    const d = ((((b - a + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
+    return a + d * k;
+  }
+
+  function segDist(sx, sy, ex, ey, px, py) {
+    const dx = ex - sx, dy = ey - sy, L2 = dx * dx + dy * dy || 1e-9;
+    const u = clamp(((px - sx) * dx + (py - sy) * dy) / L2, 0, 1);
+    return Math.hypot(px - (sx + dx * u), py - (sy + dy * u));
+  }
+
+  function spawnTurret(distMul) {
+    const hd = halfDiag(zoom);
+    const a = rnd(0, TAU), d = hd * (distMul || rnd(1.1, 1.35));
+    const va = rnd(0, TAU), r = hole.r * rnd(1.1, 1.6);
+    turrets.push({
+      t: LASER_T, x: hole.x + Math.cos(a) * d, y: hole.y + Math.sin(a) * d, r,
+      vx: Math.cos(va) * r * 0.1, vy: Math.sin(va) * r * 0.1,
+      aim: a + Math.PI, rot: a + Math.PI, vr: 0,
+      st: 'idle', tt: 0, cd: rnd(0.5, 1.5), hitRivals: null,
+      sp: getSprite(LASER_T), fade: 0, bump: 0, gone: false,
+    });
+  }
+
+  function beamOf(tu) {
+    const len = halfDiag(zoom) * 1.6;
+    const cx = Math.cos(tu.aim), cy = Math.sin(tu.aim);
+    const sx = tu.x + cx * tu.r * 0.75, sy = tu.y + cy * tu.r * 0.75;
+    return { sx, sy, ex: sx + cx * len, ey: sy + cy * len, w: Math.max(tu.r * 0.14, 2 / zoom) };
+  }
+
+  function updateTurrets(dt, hd, playing) {
+    const range = halfDiag(zoom) * 0.95;
+    for (let i = turrets.length - 1; i >= 0; i--) {
+      const tu = turrets[i];
+      tu.fade = Math.min(1, tu.fade + dt * 1.5);
+      if (tu.bump > 0) tu.bump -= dt;
+      tu.x += tu.vx * dt;
+      tu.y += tu.vy * dt;
+      const dx = hole.x - tu.x, dy = hole.y - tu.y, d = Math.hypot(dx, dy) || 1e-6;
+      const want = Math.atan2(dy, dx);
+      if (tu.st === 'idle') {
+        tu.aim = turnTo(tu.aim, want, Math.min(1, dt * 1.5));
+        tu.cd -= dt;
+        if (playing && tu.cd <= 0 && d < range) {
+          tu.st = 'charge';
+          tu.tt = 0;
+          if (onScreen(tu)) laserChargeSound();
+        }
+      } else if (tu.st === 'charge') {
+        tu.tt += dt;
+        // Son anda nişan kilitlenir: kaçmak için kısa bir fırsat
+        if (tu.tt < CHARGE_TIME - 0.45) tu.aim = turnTo(tu.aim, want, Math.min(1, dt * 7));
+        if (tu.tt >= CHARGE_TIME) {
+          tu.st = 'fire';
+          tu.tt = 0;
+          tu.hitRivals = new Set();
+          if (onScreen(tu)) laserFireSound();
+        }
+      } else {
+        tu.tt += dt;
+        const b = beamOf(tu);
+        if (playing && segDist(b.sx, b.sy, b.ex, b.ey, hole.x, hole.y) < hole.r * 0.75 + b.w) hurtPlayer(0.85, 'Lazer!');
+        for (const rv of rivals) {
+          if (!tu.hitRivals.has(rv) && segDist(b.sx, b.sy, b.ex, b.ey, rv.x, rv.y) < rv.r * 0.75 + b.w) {
+            tu.hitRivals.add(rv);
+            rv.r *= 0.85;
+          }
+        }
+        if (tu.tt >= FIRE_TIME) {
+          tu.st = 'idle';
+          tu.cd = Math.max(1.4, rnd(2.6, 4) - level * 0.12);
+        }
+      }
+      tu.rot = tu.aim;
+
+      if (playing) {
+        if (tu.r < hole.r * EAT_RATIO) {
+          const dd = attract(tu, hole, dt, 10);
+          if (dd < hole.r * 0.9) {
+            turrets.splice(i, 1);
+            eat(tu, 3, 'Lazer uydu yutuldu!');
+            continue;
+          }
+        } else {
+          pushHoleFrom(tu, playing);
+        }
+      }
+      if (tu.r < hole.r * 0.3 || Math.hypot(tu.x - cam.x, tu.y - cam.y) > hd * 2.2) {
+        tu.gone = true;
+        turrets.splice(i, 1);
+      }
+    }
+  }
+
+  function spawnNova() {
+    const r = hole.r * rnd(0.75, 1.3);
+    const blast = hole.r * 7;
+    const a = rnd(0, TAU), d = rnd(blast * 0.45, blast * 0.85);
+    novas.push({
+      t: STAR_T, x: hole.x + Math.cos(a) * d, y: hole.y + Math.sin(a) * d, r,
+      vx: 0, vy: 0, rot: rnd(0, TAU), vr: 0.3, sp: getSprite(STAR_T),
+      fuse: rnd(3.5, 4.5), age: 0, blast, st: 'fuse', bt: 0, hit: false, fade: 0, bump: 0, gone: false,
+    });
+  }
+
+  function explode(n) {
+    const near = onScreen(n, n.blast * zoom);
+    shake = Math.max(shake, near ? 0.6 : 0.2);
+    if (near) { boomSound(); vibrate(80); }
+    for (const o of objs) {
+      const ex = o.x - n.x, ey = o.y - n.y, e = Math.hypot(ex, ey);
+      if (e > 0 && e < n.blast) {
+        const f = (1 - e / n.blast) * n.blast * 0.6;
+        o.vx += (ex / e) * f;
+        o.vy += (ey / e) * f;
+      }
+    }
+    for (const rv of rivals) {
+      if (Math.hypot(rv.x - n.x, rv.y - n.y) < n.blast) rv.r *= 0.85;
+    }
+  }
+
+  function updateNovas(dt, hd, playing) {
+    for (let i = novas.length - 1; i >= 0; i--) {
+      const n = novas[i];
+      n.fade = Math.min(1, n.fade + dt * 2);
+      n.rot += n.vr * dt;
+      const dx = hole.x - n.x, dy = hole.y - n.y, d = Math.hypot(dx, dy) || 1e-6;
+      if (n.st === 'fuse') {
+        n.age += dt;
+        if (playing) {
+          if (n.r < hole.r * EAT_RATIO) {
+            if (d < hole.r * 0.9) {
+              novas.splice(i, 1);
+              eat(n, 4, 'Süpernova etkisiz!');
+              continue;
+            }
+          } else {
+            pushHoleFrom(n, playing);
+          }
+        }
+        if (n.age >= n.fuse) {
+          n.st = 'boom';
+          n.bt = 0;
+          explode(n);
+        }
+      } else {
+        n.bt += dt;
+        const rad = n.blast * (1 - Math.pow(1 - Math.min(1, n.bt / BLAST_TIME), 3));
+        if (playing && !n.hit && d - hole.r < rad && d < n.blast + hole.r) {
+          n.hit = true;
+          hurtPlayer(0.85, 'Süpernova!');
+          const kick = baseSpeed() * 1.6;
+          hole.kx += (dx / d) * kick;
+          hole.ky += (dy / d) * kick;
+        }
+        if (n.bt > 1) {
+          n.gone = true;
+          novas.splice(i, 1);
+          continue;
+        }
+      }
+      if (Math.hypot(n.x - cam.x, n.y - cam.y) > hd * 2.5) {
+        n.gone = true;
+        novas.splice(i, 1);
+      }
+    }
   }
 
   // =====================================================================
@@ -763,29 +1278,49 @@
   //  Güncelleme
   // =====================================================================
   function w2s(x, y) {
-    return { x: (x - cam.x) * zoom + W / 2, y: (y - cam.y) * zoom + H / 2 };
+    return { x: (x - cam.x) * zoom + W / 2 + shakeX, y: (y - cam.y) * zoom + H / 2 + shakeY };
   }
 
   function update(dt) {
     time += dt;
     const playing = state === 'play';
     if (playing) playTime += dt;
+    const zt = zoomTarget();
+    const hd = halfDiag(Math.min(zoom, zt));
 
     // Delik hareketi
-    const [ix, iy] = playing ? readInput() : [0, 0];
-    const maxSpeed = (Math.min(W, H) * 0.6) / zoom;
-    const k = Math.min(1, dt * 7);
-    hole.vx += (ix * maxSpeed - hole.vx) * k;
-    hole.vy += (iy * maxSpeed - hole.vy) * k;
-    hole.x += hole.vx * dt;
-    hole.y += hole.vy * dt;
+    if (!hole.dead) {
+      const [ix, iy] = playing ? readInput() : [0, 0];
+      const spd = baseSpeed();
+      const k = Math.min(1, dt * 7);
+      hole.vx += (ix * spd - hole.vx) * k;
+      hole.vy += (iy * spd - hole.vy) * k;
+      hole.x += (hole.vx + hole.kx) * dt;
+      hole.y += (hole.vy + hole.ky) * dt;
+      const kd = Math.exp(-dt * 3);
+      hole.kx *= kd;
+      hole.ky *= kd;
+    }
     hole.dr += (hole.r - hole.dr) * Math.min(1, dt * 8);
     hole.pulse = Math.max(0, hole.pulse - dt * 2.5);
+    hole.inv = Math.max(0, hole.inv - dt);
+    hole.hurt = Math.max(0, hole.hurt - dt * 2);
+    shake = Math.max(0, shake - dt * 1.5);
+
+    // Hawking ışıması: uzun süre yemezsen buharlaşırsın
+    if (playing) {
+      hole.idle += dt;
+      if (hole.idle > HAWKING_DELAY && hole.r > minHoleR()) {
+        hole.r = Math.max(minHoleR(), hole.r * (1 - HAWKING_RATE * dt));
+        if (Math.random() < dt * 14) {
+          particles.push({ ang: rnd(0, TAU), d: hole.r * 1.05, life: rnd(0.5, 0.9), t: 0, col: '#b8e1ff', out: true });
+        }
+      }
+    }
 
     // Kamera ve zoom
     cam.x += (hole.x - cam.x) * Math.min(1, dt * 6);
     cam.y += (hole.y - cam.y) * Math.min(1, dt * 6);
-    const zt = zoomTarget();
     zoom = Math.exp(Math.log(zoom) + (Math.log(zt) - Math.log(zoom)) * Math.min(1, dt * 2.2));
 
     // Yıldız paralaksı (ekran pikseli cinsinden)
@@ -794,9 +1329,10 @@
       L.oy += hole.vy * zoom * L.par * dt;
     }
 
+    updateRivals(dt, hd, playing);
+
     // Cisimler
-    const R = hole.r, pullR = R * 2.8;
-    const hd = halfDiag(Math.min(zoom, zt));
+    const R = hole.r;
     const despawnD = hd * 1.9;
     for (let i = objs.length - 1; i >= 0; i--) {
       const o = objs[i];
@@ -806,40 +1342,50 @@
       o.y += o.vy * dt;
       o.rot += o.vr * dt;
 
-      const dx = hole.x - o.x, dy = hole.y - o.y, d = Math.hypot(dx, dy) || 1e-6;
       if (o.r < R * EAT_RATIO) {
-        if (d < pullR) {
-          const f = 1 - d / pullR;
-          const acc = R * (14 * f * f + 1.5 * f);
-          o.vx += (dx / d) * acc * dt;
-          o.vy += (dy / d) * acc * dt;
-          const damp = 1 - Math.min(1, dt * 2 * f);
-          o.vx *= damp;
-          o.vy *= damp;
-        }
+        const d = attract(o, hole, dt, 14);
         if (d < R * 0.9 && playing) {
           objs.splice(i, 1);
           eat(o);
           continue;
         }
       } else {
-        const minD = R + o.r * 0.85;
-        if (d < minD) {
-          const nx = dx / d, ny = dy / d;
-          hole.x += nx * (minD - d);
-          hole.y += ny * (minD - d);
-          const vn = hole.vx * nx + hole.vy * ny;
-          if (vn < 0) {
-            hole.vx -= nx * vn * 1.3;
-            hole.vy -= ny * vn * 1.3;
-          }
-          o.bump = 0.5;
-          if (playing) bumpSound();
-        }
+        pushHoleFrom(o, playing);
       }
 
-      if (o.r < R * 0.05 || Math.hypot(o.x - cam.x, o.y - cam.y) > despawnD) objs.splice(i, 1);
+      // Rakipler de yer
+      let taken = false;
+      for (const rv of rivals) {
+        if (o.r < rv.r * EAT_RATIO) {
+          const rd = attract(o, rv, dt, 10);
+          if (rd < rv.r * 0.9) {
+            objs.splice(i, 1);
+            o.gone = true;
+            rivalGrow(rv, o.r);
+            swallowAnim(o, rv);
+            taken = true;
+            break;
+          }
+        } else {
+          const rx = rv.x - o.x, ry = rv.y - o.y, rd = Math.hypot(rx, ry) || 1e-6;
+          const minD = rv.r + o.r * 0.85;
+          if (rd < minD) {
+            rv.x += (rx / rd) * (minD - rd);
+            rv.y += (ry / rd) * (minD - rd);
+          }
+        }
+      }
+      if (taken) continue;
+
+      if (o.r < R * 0.05 || Math.hypot(o.x - cam.x, o.y - cam.y) > despawnD) {
+        o.gone = true;
+        objs.splice(i, 1);
+      }
     }
+
+    rivalInteractions(dt, hd, state === 'play');
+    updateTurrets(dt, hd, state === 'play');
+    updateNovas(dt, hd, state === 'play');
 
     // Eksik cisimleri tamamla
     const N = targetCount();
@@ -847,6 +1393,22 @@
     while (objs.length < N && tries++ < 8) {
       if (N - objs.length > N * 0.35) spawnObject(hd * 0.4, hd * 1.45);
       else spawnObject(hd * 1.05, hd * 1.45);
+    }
+
+    // Rakip ve tehlike doğurma
+    if (state === 'play') {
+      if (rivals.length < MAX_RIVALS[level] && (spawnT.rival -= dt) <= 0) {
+        spawnRival();
+        spawnT.rival = rnd(4, 8);
+      }
+      if (turrets.length < MAX_TURRETS[level] && (spawnT.turret -= dt) <= 0) {
+        spawnTurret();
+        spawnT.turret = rnd(5, 9);
+      }
+      if (level >= NOVA_FROM_LEVEL && novas.length === 0 && (spawnT.nova -= dt) <= 0) {
+        spawnNova();
+        spawnT.nova = Math.max(6, rnd(10, 16) - level * 0.5);
+      }
     }
 
     // Yutulma animasyonları
@@ -860,13 +1422,18 @@
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
       p.t += dt;
-      p.ang += dt * 5;
-      p.d *= 1 - Math.min(1, dt * 3.5);
+      if (p.out) {
+        p.d *= 1 + dt * 2.5;
+        p.ang += dt * 1.5;
+      } else {
+        p.ang += dt * 5;
+        p.d *= 1 - Math.min(1, dt * 3.5);
+      }
       if (p.t >= p.life) particles.splice(i, 1);
     }
 
     for (let i = popups.length - 1; i >= 0; i--) {
-      popups[i].t += dt;
+      popups[i].t += dt / (popups[i].col ? 1.6 : 1);
       if (popups[i].t > 1) popups.splice(i, 1);
     }
 
@@ -880,7 +1447,7 @@
       if (combo.t <= 0) combo.n = 0;
     }
 
-    if (playing) updateHud(false);
+    if (state === 'play') updateHud(false);
   }
 
   // =====================================================================
@@ -891,6 +1458,15 @@
     if (hudCache[id] !== txt) {
       hudCache[id] = txt;
       $(id).textContent = txt;
+    }
+  }
+
+  function setFlash(id, txt) {
+    if (hudCache[id] !== txt) {
+      hudCache[id] = txt;
+      const el = $(id);
+      if (txt) el.textContent = txt;
+      el.classList.toggle('show', !!txt);
     }
   }
 
@@ -907,13 +1483,13 @@
     setText('score', fmtNum(score));
     setText('timer', '⏱ ' + fmtTime(playTime));
     const m = comboMult();
-    const comboTxt = m > 1 ? `KOMBO x${m}` : '';
-    if (hudCache.combo !== comboTxt) {
-      hudCache.combo = comboTxt;
-      const el = $('combo');
-      if (comboTxt) el.textContent = comboTxt;
-      el.classList.toggle('show', !!comboTxt);
-    }
+    setFlash('combo', m > 1 ? `KOMBO x${m}` : '');
+
+    let warn = '';
+    if (hole.idle > HAWKING_DELAY) warn = '☢️ Aç kaldın, buharlaşıyorsun!';
+    const hunter = rivals.find((rv) => rv.mode === 'hunt' && hole.r < rv.r * EAT_RATIO);
+    if (hunter) warn = `⚠️ ${hunter.name} seni kovalıyor!`;
+    setFlash('warn', warn);
   }
 
   // =====================================================================
@@ -937,9 +1513,9 @@
     ctx.globalAlpha = 1;
   }
 
-  function drawObject(o, alpha) {
+  function drawObject(o, alpha, mul = 1) {
     const p = w2s(o.x, o.y);
-    const size = 2 * o.r * zoom * o.sp.scale;
+    const size = 2 * o.r * zoom * o.sp.scale * mul;
     if (size < 0.8) return;
     if (p.x + size < 0 || p.x - size > W || p.y + size < 0 || p.y - size > H) return;
     const c = Math.cos(o.rot) * DPR, s = Math.sin(o.rot) * DPR;
@@ -948,38 +1524,53 @@
     ctx.drawImage(o.sp.img, -size / 2, -size / 2, size, size);
   }
 
+  function resetCtx() {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.setLineDash([]);
+  }
+
+  // Senden büyük olan her şeyin etrafına kırmızı kesikli halka
   function drawDangerRings() {
     const R = hole.r;
     ctx.setLineDash([6, 6]);
     ctx.lineWidth = 2;
-    for (const o of objs) {
-      if (o.r < R * EAT_RATIO) continue;
+    const ring = (o, extra) => {
+      if (o.r < R * EAT_RATIO) return;
       const gap = Math.hypot(o.x - hole.x, o.y - hole.y) - o.r - R;
       const range = R * 3;
-      if (gap > range) continue;
+      if (gap > range) return;
       const a = clamp(0.65 * (1 - gap / range), 0, 0.65) + (o.bump > 0 ? 0.35 : 0);
       const p = w2s(o.x, o.y);
-      ctx.strokeStyle = `rgba(255,70,70,${a * o.fade})`;
+      ctx.strokeStyle = `rgba(255,70,70,${a * (o.fade ?? 1)})`;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, o.r * zoom * 1.08 + 3, 0, TAU);
+      ctx.arc(p.x, p.y, o.r * zoom * extra + 3, 0, TAU);
       ctx.stroke();
-    }
+    };
+    for (const o of objs) ring(o, 1.08);
+    for (const o of turrets) ring(o, 1.08);
+    for (const o of novas) if (o.st === 'fuse') ring(o, 1.08);
+    for (const o of rivals) ring(o, 1.15);
     ctx.setLineDash([]);
   }
 
-  function drawHole() {
-    const p = w2s(hole.x, hole.y);
-    const R = hole.dr * zoom * (1 + hole.pulse * 0.08);
+  const PLAYER_PAL = {
+    c1: '255,214,150', c2: '255,140,50', c3: '200,60,110', c4: '90,30,140',
+    arc: (i) => `rgba(255,${170 - i * 12},${90 + i * 10},${0.45 - i * 0.05})`,
+    ring: '255,236,210',
+  };
 
-    const g = ctx.createRadialGradient(p.x, p.y, R * 0.95, p.x, p.y, R * 2.6);
-    g.addColorStop(0, 'rgba(255,214,150,0.95)');
-    g.addColorStop(0.08, 'rgba(255,140,50,0.75)');
-    g.addColorStop(0.3, 'rgba(200,60,110,0.3)');
-    g.addColorStop(0.65, 'rgba(90,30,140,0.12)');
-    g.addColorStop(1, 'rgba(40,0,80,0)');
+  function drawBlackHole(x, y, R, pal, spin) {
+    const g = ctx.createRadialGradient(x, y, R * 0.95, x, y, R * 2.6);
+    g.addColorStop(0, `rgba(${pal.c1},0.95)`);
+    g.addColorStop(0.08, `rgba(${pal.c2},0.75)`);
+    g.addColorStop(0.3, `rgba(${pal.c3},0.3)`);
+    g.addColorStop(0.65, `rgba(${pal.c4},0.12)`);
+    g.addColorStop(1, `rgba(${pal.c4},0)`);
     ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, R * 2.6, 0, TAU);
+    ctx.arc(x, y, R * 2.6, 0, TAU);
     ctx.fill();
 
     // Dönen yığılma diski
@@ -988,23 +1579,153 @@
     ctx.lineWidth = Math.max(1, R * 0.05);
     for (let i = 0; i < 7; i++) {
       const rr = R * (1.08 + i * 0.12);
-      const a = time * (2.6 - i * 0.22) + i * 1.7;
-      ctx.strokeStyle = `rgba(255,${170 - i * 12},${90 + i * 10},${0.45 - i * 0.05})`;
-      ctx.beginPath(); ctx.arc(p.x, p.y, rr, a, a + 1.2 + i * 0.15); ctx.stroke();
-      ctx.beginPath(); ctx.arc(p.x, p.y, rr, a + Math.PI, a + Math.PI + 0.8); ctx.stroke();
+      const a = spin * (2.6 - i * 0.22) + i * 1.7;
+      ctx.strokeStyle = pal.arc(i);
+      ctx.beginPath(); ctx.arc(x, y, rr, a, a + 1.2 + i * 0.15); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, rr, a + Math.PI, a + Math.PI + 0.8); ctx.stroke();
     }
     ctx.globalCompositeOperation = 'source-over';
 
     ctx.fillStyle = '#000';
     ctx.beginPath();
-    ctx.arc(p.x, p.y, R, 0, TAU);
+    ctx.arc(x, y, R, 0, TAU);
     ctx.fill();
 
-    ctx.strokeStyle = 'rgba(255,236,210,0.9)';
+    ctx.strokeStyle = `rgba(${pal.ring},0.9)`;
     ctx.lineWidth = Math.max(1.2, R * 0.04);
     ctx.beginPath();
-    ctx.arc(p.x, p.y, R * 1.01, 0, TAU);
+    ctx.arc(x, y, R * 1.01, 0, TAU);
     ctx.stroke();
+  }
+
+  function drawHole() {
+    if (hole.dead) return;
+    const p = w2s(hole.x, hole.y);
+    const R = hole.dr * zoom * (1 + hole.pulse * 0.08);
+    ctx.globalAlpha = hole.inv > 0 && Math.sin(time * 40) > 0 ? 0.45 : 1;
+    drawBlackHole(p.x, p.y, R, PLAYER_PAL, time);
+    // Buharlaşırken mavi bir titreşim
+    if (state === 'play' && hole.idle > HAWKING_DELAY) {
+      ctx.strokeStyle = `rgba(170,215,255,${0.35 + 0.3 * Math.sin(time * 10)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, R * 1.25, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawRivals() {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const rv of rivals) {
+      const p = w2s(rv.x, rv.y), R = rv.dr * zoom;
+      if (p.x + R * 3 < 0 || p.x - R * 3 > W || p.y + R * 3 < 0 || p.y - R * 3 > H) continue;
+      ctx.globalAlpha = rv.fade;
+      drawBlackHole(p.x, p.y, R, rv.pal, rv.spin);
+      const danger = hole.r < rv.r * EAT_RATIO, food = rv.r < hole.r * EAT_RATIO;
+      ctx.font = '800 12px system-ui, sans-serif';
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+      ctx.fillStyle = danger ? '#ff6b6b' : food ? '#7dffa0' : '#ffffff';
+      const label = rv.name + (danger && rv.mode === 'hunt' ? ' 😈' : '');
+      const ly = p.y - R * 1.6 - 10;
+      ctx.strokeText(label, p.x, ly);
+      ctx.fillText(label, p.x, ly);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawNovaBodies() {
+    for (const n of novas) {
+      if (n.st !== 'fuse') continue;
+      const k = n.age / n.fuse;
+      const pulse = 1 + 0.12 * Math.sin(n.age * (6 + k * 18));
+      const p = w2s(n.x, n.y);
+      resetCtx();
+      const gr = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, n.r * zoom * 2.6 * pulse);
+      gr.addColorStop(0, `rgba(255,120,60,${0.25 + 0.45 * k})`);
+      gr.addColorStop(1, 'rgba(255,60,30,0)');
+      ctx.fillStyle = gr;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, n.r * zoom * 2.6 * pulse, 0, TAU);
+      ctx.fill();
+      drawObject(n, n.fade, pulse);
+    }
+    resetCtx();
+  }
+
+  function drawNovaEffects() {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const n of novas) {
+      const p = w2s(n.x, n.y);
+      if (n.st === 'fuse') {
+        const k = n.age / n.fuse;
+        ctx.setLineDash([10, 8]);
+        ctx.lineDashOffset = -time * 30;
+        ctx.strokeStyle = `rgba(255,150,60,${0.15 + 0.5 * k})`;
+        ctx.lineWidth = 2 + k * 2;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, n.blast * zoom, 0, TAU);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const left = Math.ceil(n.fuse - n.age);
+        ctx.font = '900 22px system-ui, sans-serif';
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillStyle = '#ffb36b';
+        const ty = p.y - n.r * zoom * 1.8 - 14;
+        ctx.strokeText(left, p.x, ty);
+        ctx.fillText(left, p.x, ty);
+      } else {
+        const a = Math.max(0, 1 - n.bt);
+        const rad = n.blast * zoom * (1 - Math.pow(1 - Math.min(1, n.bt / BLAST_TIME), 3));
+        if (rad < 1) continue;
+        const gr = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rad);
+        gr.addColorStop(0, `rgba(255,255,230,${0.8 * a})`);
+        gr.addColorStop(0.6, `rgba(255,150,70,${0.35 * a})`);
+        gr.addColorStop(1, 'rgba(255,90,40,0)');
+        ctx.fillStyle = gr;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rad, 0, TAU);
+        ctx.fill();
+        ctx.strokeStyle = `rgba(255,220,160,${a})`;
+        ctx.lineWidth = 6 * a + 1;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, rad, 0, TAU);
+        ctx.stroke();
+      }
+    }
+  }
+
+  function drawBeams() {
+    for (const tu of turrets) {
+      if (tu.st === 'idle') continue;
+      const b = beamOf(tu);
+      const s = w2s(b.sx, b.sy), e = w2s(b.ex, b.ey);
+      if (tu.st === 'charge') {
+        const k = tu.tt / CHARGE_TIME;
+        ctx.setLineDash([8, 8]);
+        ctx.lineDashOffset = -time * 60;
+        ctx.strokeStyle = `rgba(255,60,60,${0.25 + 0.55 * k})`;
+        ctx.lineWidth = 1 + k * 1.5;
+        ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(e.x, e.y); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = `rgba(255,90,90,${0.7 * k})`;
+        ctx.beginPath(); ctx.arc(s.x, s.y, 2 + k * Math.max(6, b.w * zoom * 2), 0, TAU); ctx.fill();
+      } else {
+        const w = Math.max(3, b.w * zoom * 2) * (1 - (tu.tt / FIRE_TIME) * 0.5);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineCap = 'round';
+        for (const [col, lw] of [['rgba(255,40,40,0.55)', w * 2.2], ['rgba(255,170,170,0.95)', w], ['#ffffff', w * 0.35]]) {
+          ctx.strokeStyle = col;
+          ctx.lineWidth = lw;
+          ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(e.x, e.y); ctx.stroke();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    }
   }
 
   function drawEaten() {
@@ -1013,7 +1734,7 @@
       const ang = e.ang + p * p * 5;
       const d = e.d * Math.pow(1 - p, 1.2);
       const o = e.o;
-      const sp = w2s(hole.x + Math.cos(ang) * d, hole.y + Math.sin(ang) * d);
+      const sp = w2s(e.host.x + Math.cos(ang) * d, e.host.y + Math.sin(ang) * d);
       const size = 2 * o.r * zoom * o.sp.scale * Math.pow(1 - p, 0.7);
       if (size < 0.5) continue;
       // Spagettileşme: merkeze doğru uzayıp incelir
@@ -1025,8 +1746,7 @@
       ctx.globalAlpha = 1 - p * p;
       ctx.drawImage(o.sp.img, -size / 2, -size / 2, size, size);
     }
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    ctx.globalAlpha = 1;
+    resetCtx();
   }
 
   function drawParticles() {
@@ -1059,14 +1779,62 @@
   function drawPopups() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
     for (const pp of popups) {
       const s = w2s(pp.x, pp.y);
-      ctx.globalAlpha = 1 - pp.t;
-      ctx.font = `800 ${pp.big ? 18 : 13}px system-ui, sans-serif`;
-      ctx.fillStyle = pp.big ? '#ffd36b' : '#ffffff';
-      ctx.fillText(pp.text, s.x, s.y - pp.t * 40);
+      const x = clamp(s.x, 90, W - 90);
+      ctx.globalAlpha = 1 - pp.t * pp.t;
+      ctx.font = `800 ${pp.col ? 16 : pp.big ? 18 : 13}px system-ui, sans-serif`;
+      ctx.fillStyle = pp.col || (pp.big ? '#ffd36b' : '#ffffff');
+      if (pp.col) ctx.strokeText(pp.text, x, s.y - pp.t * 40);
+      ctx.fillText(pp.text, x, s.y - pp.t * 40);
     }
     ctx.globalAlpha = 1;
+  }
+
+  // Ekran dışındaki rakip ve süpernovaları kenarda okla göster
+  function drawArrows() {
+    if (state !== 'play') return;
+    const hd = halfDiag(zoom);
+    const items = [];
+    for (const rv of rivals) {
+      const col = hole.r < rv.r * EAT_RATIO ? '255,80,80' : rv.r < hole.r * EAT_RATIO ? '110,255,150' : '255,255,255';
+      items.push([rv, col]);
+    }
+    for (const n of novas) if (n.st === 'fuse') items.push([n, '255,160,60']);
+    for (const [o, col] of items) {
+      if (onScreen(o)) continue;
+      const dist = Math.hypot(o.x - hole.x, o.y - hole.y);
+      if (dist > hd * 2.5) continue;
+      const p = w2s(o.x, o.y);
+      const cx = W / 2, cy = H / 2, dx = p.x - cx, dy = p.y - cy;
+      const lim = Math.min(
+        (W / 2 - 22) / Math.max(Math.abs(dx), 1e-6),
+        (dy < 0 ? H / 2 - 84 : H / 2 - 30) / Math.max(Math.abs(dy), 1e-6),
+      );
+      const x = cx + dx * lim, y = cy + dy * lim;
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx.translate(x, y);
+      ctx.rotate(Math.atan2(dy, dx));
+      ctx.fillStyle = `rgba(${col},${clamp(1.3 - dist / (hd * 2.5), 0.35, 1)})`;
+      ctx.beginPath();
+      ctx.moveTo(13, 0);
+      ctx.lineTo(-7, -10);
+      ctx.lineTo(-7, 10);
+      ctx.closePath();
+      ctx.fill();
+    }
+    resetCtx();
+  }
+
+  function drawHurt() {
+    if (hole.hurt <= 0) return;
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.hypot(W, H) / 2);
+    g.addColorStop(0, 'rgba(255,0,0,0)');
+    g.addColorStop(1, `rgba(255,30,30,${0.5 * hole.hurt})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
   }
 
   function drawJoystick() {
@@ -1083,18 +1851,26 @@
   }
 
   function render() {
+    shakeX = shake > 0 ? (Math.random() - 0.5) * shake * 16 : 0;
+    shakeY = shake > 0 ? (Math.random() - 0.5) * shake * 16 : 0;
     drawBackground();
     objs.sort((a, b) => b.r - a.r); // büyükler arkada
     for (const o of objs) drawObject(o, o.fade);
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    ctx.globalAlpha = 1;
+    for (const tu of turrets) drawObject(tu, tu.fade);
+    resetCtx();
+    drawNovaBodies();
     if (state === 'play') drawDangerRings();
+    drawRivals();
     drawHole();
     drawEaten();
     drawParticles();
+    drawBeams();
+    drawNovaEffects();
     drawWaves();
     drawPopups();
+    drawArrows();
     drawJoystick();
+    drawHurt();
   }
 
   // =====================================================================
@@ -1120,8 +1896,7 @@
     initAudio();
     reset();
     state = 'play';
-    $('menu').classList.remove('show');
-    $('win').classList.remove('show');
+    for (const id of ['menu', 'win', 'dead']) $(id).classList.remove('show');
     $('hud').classList.remove('hidden');
     const banner = $('banner');
     banner.querySelector('.name').textContent = LEVELS[0].name;
@@ -1135,6 +1910,7 @@
 
   $('startBtn').addEventListener('click', startGame);
   $('againBtn').addEventListener('click', startGame);
+  $('retryBtn').addEventListener('click', startGame);
   $('continueBtn').addEventListener('click', () => {
     endless = true;
     state = 'play';
@@ -1167,8 +1943,21 @@
         while (level < LEVELS.length - 1 && hole.r >= LEVELS[level + 1].r) level++;
         zoom = zoomTarget();
         objs.length = 0;
+        rivals.length = 0;
+        turrets.length = 0;
+        novas.length = 0;
       },
-      get state() { return { state, level, r: hole.r, score, objs: objs.length }; },
+      rival(rel, dist) { spawnRival(rel, dist); },
+      turret(dist) { spawnTurret(dist); turrets[turrets.length - 1].cd = 0; },
+      nova() { spawnNova(); },
+      starve() { hole.idle = 10; },
+      get state() {
+        return {
+          state, level, r: hole.r, score, objs: objs.length,
+          rivals: rivals.map((r) => `${r.name}:${r.mode}:${(r.r / hole.r).toFixed(2)}`),
+          turrets: turrets.map((t) => t.st), novas: novas.map((n) => n.st),
+        };
+      },
     };
   }
 })();
