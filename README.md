@@ -60,6 +60,13 @@ Her rakibin bir adı ve kendi renkli diski var (Vakum, Kara Kurt, Obur, Girdap�
 
 Küçülme bir alt sınırda durur ve seviye hiçbir zaman düşmez.
 
+## Evren ve mini harita
+
+- Evren dairesel ve sınırlı; kenarı kesikli mor çizgiyle gösterilir. Her **SIZE UP**'ta evren de seninle birlikte büyür.
+- Sağ üstteki **mini harita** evrenin tamamını gösterir: sen (renkli nokta), ekranda gördüğün alan (çerçeve), rakipler (🔴 tehlikeli, 🟢 yenebilir, ⚪ denk), süpernovalar ve patlama alanları, lazer uydular, altın cisimler ve olay bölgeleri (☄️ turuncu meteor yağmuru, 🟣 kara madde, 🔵 solucan deliği).
+- Rakipler artık evrenin her yerinde yaşar ve sen görmesen de büyür; sayıları seviyeyle 3'ten 8'e çıkar.
+- Olaylar senden uzakta bir bölgede başlar; mini haritaya bakıp oraya gitmen gerekir.
+
 ## Tempo
 
 Cisimler seyrek ve aralarında mesafe var (agar.io gibi); büyümek zaman alır, oyun uzun soluklu.

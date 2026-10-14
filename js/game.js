@@ -93,6 +93,7 @@
     canvas.style.width = W + 'px';
     canvas.style.height = H + 'px';
     buildBackground();
+    if (typeof resizeMinimap === 'function') mmSize = 0;
   }
 
   function buildBackground() {
@@ -590,7 +591,8 @@
     rivals = [];
     turrets = [];
     novas = [];
-    spawnT = { rival: 2.5, turret: 5, nova: 10 };
+    spawnT = { rival: 3, turret: 5, nova: 10 };
+    mmArena = 0;
     shake = 0;
     deathBy = '';
     combo = { n: 0, t: 0 };
@@ -602,6 +604,7 @@
     trails = [];
     const hd = halfDiag(zoom);
     for (let i = 0; i < targetCount() * 1.5 && objs.length < targetCount(); i++) spawnObject(hd * 0.15, hd * 1.4);
+    for (let i = 0; i < MAX_RIVALS[0]; i++) spawnRival();
     updateHud(true);
   }
 
@@ -636,13 +639,45 @@
     return best;
   }
 
+  // =====================================================================
+  //  Evren sınırı: seviyeyle birlikte büyüyen dairesel alan
+  // =====================================================================
+  const ARENA_K = 140;                         // evren yarıçapı = seviye yarıçapı x 140
+  const arenaR = () => LEVELS[level].r * ARENA_K;
+  let mmArena = 0;                             // mini harita için yumuşatılmış yarıçap
+  const inArena = (x, y, margin = 0) => Math.hypot(x, y) < arenaR() - margin;
+
+  // Sınırdan dışarı çıkanı geri iter; çarptıysa true döner
+  function clampToArena(o, margin) {
+    const A = arenaR() - margin, d = Math.hypot(o.x, o.y);
+    if (d <= A || d === 0) return false;
+    o.x *= A / d;
+    o.y *= A / d;
+    const nx = o.x / A, ny = o.y / A;
+    const vn = o.vx * nx + o.vy * ny;
+    if (vn > 0) { o.vx -= nx * vn; o.vy -= ny * vn; }
+    return true;
+  }
+
+  // Bir noktanın çevresinde, evrenin içinde kalan rastgele bir yer
+  function spotNear(cx, cy, minD, maxD, margin = 0) {
+    for (let i = 0; i < 12; i++) {
+      const a = rnd(0, TAU), d = rnd(minD, maxD);
+      const x = cx + Math.cos(a) * d, y = cy + Math.sin(a) * d;
+      if (inArena(x, y, margin)) return [x, y, a];
+    }
+    // Sınırdaysak merkeze doğru yerleştir
+    const a = Math.atan2(-cy, -cx), d = minD;
+    return [cx + Math.cos(a) * d, cy + Math.sin(a) * d, a];
+  }
+
   function spawnObject(minD, maxD) {
     const s = pickSize();
     const t = pickType(s);
     const r = clamp(s, t.min, t.max);
     const a = rnd(0, TAU), d = rnd(minD, maxD);
     const x = cam.x + Math.cos(a) * d, y = cam.y + Math.sin(a) * d;
-    if (Math.hypot(x - hole.x, y - hole.y) < hole.r * 3 + r) return;
+    if (Math.hypot(x - hole.x, y - hole.y) < hole.r * 3 + r || !inArena(x, y, r)) return;
     const comet = t.kind === 'comet';
     const speed = r * rnd(0.05, 0.3) * (comet ? 6 : 1);
     const va = rnd(0, TAU);
@@ -826,7 +861,7 @@
   const RIVAL_NAMES = ['Vakum', 'Kara Kurt', 'Obur', 'Girdap', 'Hiçlik', 'Kuyu', 'Açgözlü', 'Kaos', 'Gölge', 'Zifir'];
   const RIVAL_COLS = [[160, 100, 255], [70, 200, 255], [90, 255, 170], [255, 90, 170], [255, 230, 100]];
   // Seviyeye göre aynı anda en fazla kaç rakip / lazer uydu olabilir
-  const MAX_RIVALS = [1, 1, 2, 2, 2, 3, 3, 3, 4, 4];
+  const MAX_RIVALS = [3, 4, 5, 5, 6, 6, 7, 7, 8, 8];
   const MAX_TURRETS = [0, 1, 1, 2, 2, 2, 3, 3, 3, 3];
   const NOVA_FROM_LEVEL = 2;
 
@@ -861,8 +896,19 @@
   }
 
   function spawnRival(rel, distMul) {
-    const hd = halfDiag(zoom);
-    const a = rnd(0, TAU), d = hd * (distMul || rnd(1.15, 1.4));
+    const hd = halfDiag(zoom), A = arenaR();
+    let x, y;
+    if (distMul) {
+      [x, y] = spotNear(hole.x, hole.y, hd * distMul, hd * distMul);
+    } else {
+      // Evrenin herhangi bir yerinde, ama ekranın dışında
+      for (let i = 0; i < 20; i++) {
+        const a = rnd(0, TAU), d = Math.sqrt(Math.random()) * A * 0.92;
+        x = Math.cos(a) * d;
+        y = Math.sin(a) * d;
+        if (Math.hypot(x - hole.x, y - hole.y) > hd * 1.3) break;
+      }
+    }
     if (!rel) {
       const bigChance = level === 0 ? 0 : Math.min(0.5, 0.3 + level * 0.025);
       rel = Math.random() < bigChance ? rnd(1.15, 1.6) : rnd(0.45, 0.8);
@@ -872,7 +918,7 @@
     const col = pick(RIVAL_COLS);
     const r = hole.r * rel;
     rivals.push({
-      x: hole.x + Math.cos(a) * d, y: hole.y + Math.sin(a) * d, r, dr: r, vx: 0, vy: 0,
+      x, y, r, dr: r, vx: 0, vy: 0,
       name: names.length ? pick(names) : pick(RIVAL_NAMES),
       col, pal: rivalPalette(col), sp: rivalSprite(col), t: { col: `rgb(${col})` },
       rot: 0, vr: 3, spin: rnd(0, TAU), fade: 0, gone: false, cid: 'rival', cname: 'Rakip Kara Delik',
@@ -890,7 +936,7 @@
 
   function rivalThink(rv, hd, playing) {
     const dP = Math.hypot(hole.x - rv.x, hole.y - rv.y);
-    const sense = hd * 1.1;
+    const sense = hd * 1.3;
     const canEatPlayer = hole.r < rv.r * EAT_RATIO;
     const playerCanEat = rv.r < hole.r * EAT_RATIO;
     if (playing && canEatPlayer && dP < sense && rv.cd <= 0) {
@@ -959,6 +1005,9 @@
       rv.vy += (diry * s * spd * cm - rv.vy) * k;
       rv.x += rv.vx * dt;
       rv.y += rv.vy * dt;
+      if (clampToArena(rv, rv.r)) rv.wander = Math.atan2(-rv.y, -rv.x) + rnd(-1, 1);
+      // Uzaktaki rakipler de (görmesen bile) beslenip yavaş yavaş büyür
+      if (d > hd * 1.6) rv.r = Math.max(rv.r, Math.min(rv.r * (1 + 0.006 * dt), hole.r * (level === 0 ? 0.85 : 1.7)));
       rv.dr += (rv.r - rv.dr) * Math.min(1, dt * 6);
     }
   }
@@ -1014,8 +1063,7 @@
     }
     for (let i = rivals.length - 1; i >= 0; i--) {
       const rv = rivals[i];
-      const far = Math.hypot(rv.x - cam.x, rv.y - cam.y) > hd * 2.6;
-      if (rv.gone || far || rv.r < hole.r * 0.12) {
+      if (rv.gone || rv.r < hole.r * 0.12) {
         rv.gone = true;
         rivals.splice(i, 1);
       }
@@ -1042,10 +1090,10 @@
 
   function spawnTurret(distMul) {
     const hd = halfDiag(zoom);
-    const a = rnd(0, TAU), d = hd * (distMul || rnd(1.1, 1.35));
+    const [x, y, a] = spotNear(hole.x, hole.y, hd * (distMul || 1.1), hd * (distMul || 1.35));
     const va = rnd(0, TAU), r = hole.r * rnd(1.1, 1.6);
     turrets.push({
-      t: LASER_T, x: hole.x + Math.cos(a) * d, y: hole.y + Math.sin(a) * d, r,
+      t: LASER_T, x, y, r,
       vx: Math.cos(va) * r * 0.1, vy: Math.sin(va) * r * 0.1,
       aim: a + Math.PI, rot: a + Math.PI, vr: 0,
       st: 'idle', tt: 0, cd: rnd(0.5, 1.5), hitRivals: null,
@@ -1128,9 +1176,9 @@
   function spawnNova() {
     const r = hole.r * rnd(0.75, 1.3);
     const blast = hole.r * 7;
-    const a = rnd(0, TAU), d = rnd(blast * 0.45, blast * 0.85);
+    const [x, y] = spotNear(hole.x, hole.y, blast * 0.45, blast * 0.85, r);
     novas.push({
-      t: STAR_T, x: hole.x + Math.cos(a) * d, y: hole.y + Math.sin(a) * d, r,
+      t: STAR_T, x, y, r,
       vx: 0, vy: 0, rot: rnd(0, TAU), vr: 0.3, sp: getSprite(STAR_T),
       fuse: rnd(3.5, 4.5), age: 0, blast, st: 'fuse', bt: 0, hit: false, fade: 0, bump: 0, gone: false, cid: 'nova', cname: 'Süpernova',
     });
@@ -1421,9 +1469,9 @@
   function spawnRare() {
     const hd = halfDiag(zoom);
     const t = pick(RARES);
-    const a = rnd(0, TAU), d = hd * rnd(0.75, 1.05);
+    const [x, y] = spotNear(hole.x, hole.y, hd * 0.75, hd * 1.05, hole.r);
     objs.push({
-      t, x: hole.x + Math.cos(a) * d, y: hole.y + Math.sin(a) * d, r: hole.r * rnd(0.4, 0.55),
+      t, x, y, r: hole.r * rnd(0.4, 0.55),
       vx: 0, vy: 0, rot: 0, vr: 0.8, sp: getSprite(t), fade: 0, bump: 0, gone: false,
       rare: true, life: 22, wander: rnd(0, TAU),
     });
@@ -1437,8 +1485,10 @@
       const s = hole.r * (0.15 + 0.55 * Math.pow(Math.random(), 1.3));
       const t = pickType(s), r = clamp(s, t.min, t.max);
       const a = rnd(0, TAU), d = minD + Math.sqrt(Math.random()) * (maxD - minD);
+      const x = cx + Math.cos(a) * d, y = cy + Math.sin(a) * d;
+      if (!inArena(x, y, r)) continue;
       objs.push({
-        t, x: cx + Math.cos(a) * d, y: cy + Math.sin(a) * d, r, vx: 0, vy: 0,
+        t, x, y, r, vx: 0, vy: 0,
         rot: rnd(0, TAU), vr: rnd(-1, 1) * t.spin, sp: getSprite(t), fade: 0, bump: 0, gone: false,
       });
     }
@@ -1446,38 +1496,36 @@
 
   function spawnMeteor(hd) {
     const dir = ev.dir + rnd(-0.12, 0.12);
-    const px = -Math.sin(ev.dir), py = Math.cos(ev.dir), off = rnd(-1, 1) * hd * 0.9;
+    const px = -Math.sin(ev.dir), py = Math.cos(ev.dir), off = rnd(-0.85, 0.85) * ev.r;
+    const x = ev.x - Math.cos(dir) * ev.r * 1.1 + px * off, y = ev.y - Math.sin(dir) * ev.r * 1.1 + py * off;
+    if (Math.hypot(x - cam.x, y - cam.y) > hd * 1.85) return; // kamera uzaktaysa hemen kaybolurdu
     const s = hole.r * (0.15 + 0.5 * Math.pow(Math.random(), 1.4));
     const t = pickType(s), r = clamp(s, t.min, t.max);
     const sp = baseSpeed() * rnd(0.7, 1);
     objs.push({
-      t, r,
-      x: hole.x - Math.cos(dir) * hd * 1.15 + px * off,
-      y: hole.y - Math.sin(dir) * hd * 1.15 + py * off,
+      t, r, x, y,
       vx: Math.cos(dir) * sp, vy: Math.sin(dir) * sp,
       rot: rnd(0, TAU), vr: rnd(-2, 2), sp: getSprite(t), fade: 0.4, bump: 0, gone: false, meteor: true,
     });
   }
 
-  function startEvent(kind) {
+  // Olaylar senden biraz uzakta bir bölgede çıkar; yerini mini haritada görürsün
+  function startEvent(kind, nearMul) {
     const hd = halfDiag(zoom);
     kind = kind || pick(['meteor', 'meteor', 'cloud', 'worm']);
-    const a = rnd(0, TAU);
+    const [x, y] = spotNear(hole.x, hole.y, hd * (nearMul || 1.5), hd * (nearMul || 3.2), hd);
     if (kind === 'meteor') {
-      ev = { kind, t: 0, dur: 10, dir: a, acc: 0 };
-      showBanner('METEOR YAĞMURU', '☄️ Gökten yem yağıyor!', 'Fırsatı kaçırma, topla hepsini', 'event');
+      ev = { kind, t: 0, dur: 28, x, y, r: hd * 0.9, dir: rnd(0, TAU), acc: 0 };
+      showBanner('METEOR YAĞMURU', '☄️ Bir bölgeye yem yağıyor!', 'Mini haritadaki turuncu alana koş', 'event');
     } else if (kind === 'cloud') {
-      const d = hd * rnd(0.5, 0.8), r = hd * rnd(0.45, 0.6);
       ev = {
-        kind, t: 0, dur: 18, x: hole.x + Math.cos(a) * d, y: hole.y + Math.sin(a) * d, r,
+        kind, t: 0, dur: 30, x, y, r: hd * rnd(0.5, 0.7), fed: false,
         blobs: Array.from({ length: 9 }, () => ({ a: rnd(0, TAU), d: Math.sqrt(Math.random()) * 0.7, s: rnd(0.35, 0.6), w: rnd(-0.3, 0.3) })),
       };
-      spawnFoodAt(ev.x, ev.y, 0, r * 0.85, 12);
-      showBanner('KARA MADDE', '🐌 İçinde çok yavaşlarsın', 'Ama içi yem dolu: risk al ya da uzak dur', 'event');
+      showBanner('KARA MADDE', '🐌 İçinde yavaşlarsın ama yem dolu', 'Mini haritadaki mor alan', 'event');
     } else {
-      const d = hd * rnd(0.45, 0.7);
-      ev = { kind, t: 0, dur: 18, x: hole.x + Math.cos(a) * d, y: hole.y + Math.sin(a) * d, r: hole.r * 1.4 };
-      showBanner('SOLUCAN DELİĞİ', '🌀 Uzayın başka bir köşesine açılıyor', 'Gir, rakiplerden kurtul, yeni bölgeye fırla', 'event');
+      ev = { kind, t: 0, dur: 30, x, y, r: hole.r * 1.4 };
+      showBanner('SOLUCAN DELİĞİ', '🌀 Evrenin başka bir köşesine açılıyor', 'Mini haritadaki mavi halka: gir ve ışınlan', 'event');
     }
     eventSound();
   }
@@ -1491,14 +1539,21 @@
   }
 
   function teleport(hd) {
-    const a = rnd(0, TAU), d = hd * 6;
-    const ox = Math.cos(a) * d, oy = Math.sin(a) * d;
+    // Evrenin uzak bir köşesine
+    const A = arenaR();
+    let tx = 0, ty = 0;
+    for (let i = 0; i < 20; i++) {
+      const a = rnd(0, TAU), d = Math.sqrt(Math.random()) * (A - hd);
+      tx = Math.cos(a) * d;
+      ty = Math.sin(a) * d;
+      if (Math.hypot(tx - hole.x, ty - hole.y) > A * 0.5) break;
+    }
+    const ox = tx - hole.x, oy = ty - hole.y;
     hole.x += ox; hole.y += oy;
     cam.x += ox; cam.y += oy;
     trails.length = 0;
     flash = 1;
     run.worms++;
-    // Geride kalan rakipler ve tehlikeler uzakta kaldığı için kaybolur
     spawnFoodAt(hole.x, hole.y, hole.r * 3, hd * 0.8, 14);
     popups.push({ x: hole.x, y: hole.y - hole.r * 2, text: 'Yeni bölge!', t: 0, big: true, col: '#8fe8ff' });
     teleportSound();
@@ -1515,10 +1570,14 @@
       ev.t += dt;
       if (ev.kind === 'meteor' && ev.t < ev.dur) {
         ev.acc += dt;
-        while (ev.acc > 0.16) {
-          ev.acc -= 0.16;
+        while (ev.acc > 0.14) {
+          ev.acc -= 0.14;
           spawnMeteor(hd);
         }
+      } else if (ev.kind === 'cloud' && !ev.fed && Math.hypot(cam.x - ev.x, cam.y - ev.y) < hd * 1.3 + ev.r) {
+        // İçindeki yem, oraya yaklaşınca belirir
+        ev.fed = true;
+        spawnFoodAt(ev.x, ev.y, 0, ev.r * 0.85, 12);
       } else if (ev.kind === 'worm' && ev.t > 0.5 && ev.t < ev.dur - 0.5) {
         if (Math.hypot(hole.x - ev.x, hole.y - ev.y) < ev.r * 0.8 + hole.r * 0.2) {
           ev = null;
@@ -1554,6 +1613,7 @@
     const m = Math.hypot(dx, dy) || 1, v = baseSpeed() * s * cloudMul(o.x, o.y), k = Math.min(1, dt * 3);
     o.vx += ((dx / m) * v - o.vx) * k;
     o.vy += ((dy / m) * v - o.vy) * k;
+    if (clampToArena(o, o.r)) o.wander = Math.atan2(-o.y, -o.x);
     return o.life > 0;
   }
 
@@ -1758,6 +1818,7 @@
       const kd = Math.exp(-dt * 3);
       hole.kx *= kd;
       hole.ky *= kd;
+      if (clampToArena(hole, hole.r)) { hole.kx *= 0.5; hole.ky *= 0.5; }
     }
     hole.dr += (hole.r - hole.dr) * Math.min(1, dt * 8);
     hole.pulse = Math.max(0, hole.pulse - dt * 2.5);
@@ -1786,6 +1847,7 @@
     cam.x += (hole.x - cam.x) * Math.min(1, dt * 6);
     cam.y += (hole.y - cam.y) * Math.min(1, dt * 6);
     zoom = Math.exp(Math.log(zoom) + (Math.log(zt) - Math.log(zoom)) * Math.min(1, dt * 2.2));
+    mmArena = mmArena ? mmArena + (arenaR() - mmArena) * Math.min(1, dt * 1.5) : arenaR();
 
     // Yıldız paralaksı (ekran pikseli cinsinden)
     for (const L of starLayers) {
@@ -1880,7 +1942,7 @@
     if (state === 'play') {
       if (rivals.length < MAX_RIVALS[level] && (spawnT.rival -= dt) <= 0) {
         spawnRival();
-        spawnT.rival = rnd(4, 8);
+        spawnT.rival = rivals.length < MAX_RIVALS[level] - 2 ? rnd(0.3, 0.8) : rnd(2, 4);
       }
       if (turrets.length < MAX_TURRETS[level] && (spawnT.turret -= dt) <= 0) {
         spawnTurret();
@@ -1976,6 +2038,7 @@
     }
     if (hole.idle > HAWKING_DELAY) warn = '☢️ Aç kaldın, buharlaşıyorsun!';
     if (cloudMul(hole.x, hole.y) < 1) warn = '🐌 Kara maddedesin, yavaşladın!';
+    if (!inArena(hole.x, hole.y, halfDiag(zoom) * 0.5)) warn = '🚧 Evrenin kenarına geldin';
     const hunter = rivals.find((rv) => rv.mode === 'hunt' && hole.r < rv.r * EAT_RATIO);
     if (hunter) warn = `⚠️ ${hunter.name} seni kovalıyor!`;
     setFlash('warn', warn);
@@ -2293,7 +2356,7 @@
     }
     for (const n of novas) if (n.st === 'fuse') items.push([n, '255,160,60']);
     for (const o of objs) if (o.rare) items.push([o, '255,210,80']);
-    if (ev && ev.kind === 'worm') items.push([ev, '90,220,255']);
+    if (ev) items.push([ev, { worm: '90,220,255', meteor: '255,150,60', cloud: '170,110,255' }[ev.kind]]);
     for (const [o, col] of items) {
       if (onScreen(o)) continue;
       const dist = Math.hypot(o.x - hole.x, o.y - hole.y);
@@ -2460,10 +2523,124 @@
     ctx.fillRect(0, 0, W, H);
   }
 
+  // Evrenin kenarı: dışı karartılır, sınır kesikli çizgiyle gösterilir
+  function drawArenaEdge() {
+    const A = arenaR();
+    if (A - Math.hypot(cam.x, cam.y) > halfDiag(zoom) * 1.05) return;
+    const p = w2s(0, 0), R = A * zoom;
+    ctx.fillStyle = 'rgba(3,2,10,0.6)';
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.arc(p.x, p.y, R, 0, TAU, true);
+    ctx.fill('evenodd');
+    ctx.setLineDash([14, 10]);
+    ctx.lineDashOffset = -time * 20;
+    ctx.strokeStyle = 'rgba(170,130,255,0.6)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, R, 0, TAU);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function drawMeteorZone() {
+    if (!ev || ev.kind !== 'meteor') return;
+    const a = evAlpha(), p = w2s(ev.x, ev.y), R = ev.r * zoom;
+    if (p.x + R < 0 || p.x - R > W || p.y + R < 0 || p.y - R > H) return;
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
+    g.addColorStop(0, `rgba(255,140,60,${0.12 * a})`);
+    g.addColorStop(1, 'rgba(255,100,40,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, R, 0, TAU);
+    ctx.fill();
+    ctx.setLineDash([6, 12]);
+    ctx.strokeStyle = `rgba(255,170,90,${0.45 * a})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, R, 0, TAU);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Mini harita: evrenin tamamı, sen, rakipler, tehlikeler ve olaylar
+  const mmCanvas = $('minimap'), mmCtx = mmCanvas.getContext('2d');
+  let mmSize = 0;
+  function resizeMinimap() {
+    mmSize = mmCanvas.clientWidth || 110;
+    mmCanvas.width = mmCanvas.height = Math.round(mmSize * DPR);
+  }
+
+  function drawMinimap() {
+    if (state !== 'play' || !mmArena) return;
+    if (!mmSize) resizeMinimap();
+    const g = mmCtx, S = mmSize, c = S / 2, k = (c - 5) / mmArena;
+    const P = (x, y) => [c + x * k, c + y * k];
+    const dot = (x, y, r, fill) => { g.fillStyle = fill; g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill(); };
+    g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    g.clearRect(0, 0, S, S);
+    g.save();
+    g.beginPath();
+    g.arc(c, c, c - 1, 0, TAU);
+    g.clip();
+    g.fillStyle = 'rgba(12,8,30,0.78)';
+    g.fillRect(0, 0, S, S);
+    g.strokeStyle = 'rgba(255,255,255,0.06)';
+    g.lineWidth = 1;
+    for (const f of [0.33, 0.66]) { g.beginPath(); g.arc(c, c, (c - 5) * f, 0, TAU); g.stroke(); }
+
+    // Olay bölgesi
+    if (ev) {
+      const col = { worm: '90,220,255', meteor: '255,150,60', cloud: '170,110,255' }[ev.kind];
+      const [x, y] = P(ev.x, ev.y), a = evAlpha(), pul = 1 + 0.25 * Math.sin(time * 5);
+      const rr = ev.kind === 'worm' ? 4 * pul : Math.max(5, ev.r * k);
+      g.fillStyle = `rgba(${col},${0.3 * a})`;
+      g.beginPath(); g.arc(x, y, rr, 0, TAU); g.fill();
+      g.strokeStyle = `rgba(${col},${0.95 * a})`;
+      g.lineWidth = 1.5;
+      g.beginPath(); g.arc(x, y, rr + (ev.kind === 'worm' ? 2 : 0), 0, TAU); g.stroke();
+    }
+    // Süpernovalar ve patlama alanları
+    for (const n of novas) {
+      if (n.st !== 'fuse') continue;
+      const [x, y] = P(n.x, n.y);
+      g.strokeStyle = `rgba(255,150,60,${0.4 + 0.4 * Math.sin(time * 10)})`;
+      g.lineWidth = 1;
+      g.beginPath(); g.arc(x, y, Math.max(3, n.blast * k), 0, TAU); g.stroke();
+      dot(x, y, 2.5, '#ffb36b');
+    }
+    // Lazer uydular
+    g.fillStyle = '#ff5a5a';
+    for (const tu of turrets) { const [x, y] = P(tu.x, tu.y); g.fillRect(x - 1.5, y - 1.5, 3, 3); }
+    // Altın cisimler
+    for (const o of objs) if (o.rare) { const [x, y] = P(o.x, o.y); dot(x, y, 2.5 + Math.sin(time * 8), '#ffd36b'); }
+    // Rakipler: kırmızı tehlikeli, yeşil yenebilir
+    for (const rv of rivals) {
+      const [x, y] = P(rv.x, rv.y), rel = rv.r / hole.r;
+      const col = hole.r < rv.r * EAT_RATIO ? '#ff5a5a' : rv.r < hole.r * EAT_RATIO ? '#6dff96' : '#ffffff';
+      dot(x, y, clamp(1.5 + 2 * rel, 1.8, 5), col);
+    }
+    // Ekranda gördüğün alan
+    const [vx, vy] = P(cam.x - W / 2 / zoom, cam.y - H / 2 / zoom);
+    g.strokeStyle = 'rgba(255,255,255,0.35)';
+    g.lineWidth = 1;
+    g.strokeRect(vx, vy, (W / zoom) * k, (H / zoom) * k);
+    // Sen
+    const [hx, hy] = P(hole.x, hole.y);
+    dot(hx, hy, 4.5, '#ffffff');
+    dot(hx, hy, 3, `rgb(${playerPalette().c2})`);
+    g.restore();
+    g.strokeStyle = 'rgba(190,150,255,0.6)';
+    g.lineWidth = 1.5;
+    g.beginPath(); g.arc(c, c, c - 1, 0, TAU); g.stroke();
+  }
+
   function render() {
     shakeX = shake > 0 ? (Math.random() - 0.5) * shake * 16 : 0;
     shakeY = shake > 0 ? (Math.random() - 0.5) * shake * 16 : 0;
     drawBackground();
+    drawArenaEdge();
+    drawMeteorZone();
     objs.sort((a, b) => b.r - a.r); // büyükler arkada
     for (const o of objs) {
       if (o.rare) drawRareGlow(o);
@@ -2500,6 +2677,7 @@
     last = now;
     if (state !== 'won') update(dt);
     render();
+    drawMinimap();
     musicTick();
     requestAnimationFrame(frame);
   }
@@ -2602,13 +2780,14 @@
       turret(dist) { spawnTurret(dist); turrets[turrets.length - 1].cd = 0; },
       nova() { spawnNova(); },
       starve() { hole.idle = 10; },
-      event(kind) { ev = null; startEvent(kind); },
+      event(kind, near) { ev = null; startEvent(kind, near); },
       rare() { spawnRare(); },
+      edge() { hole.x = arenaR() * 0.97; hole.y = 0; cam.x = hole.x; cam.y = 0; },
       dash() { tryDash(); },
       get run() { return { run, ev: ev && ev.kind, dashCd: hole.dashCd, meta }; },
       get state() {
         return {
-          state, level, r: hole.r, score, objs: objs.length,
+          state, level, r: hole.r, score, objs: objs.length, arena: arenaR(), pos: [Math.round(hole.x), Math.round(hole.y)],
           rivals: rivals.map((r) => `${r.name}:${r.mode}:${(r.r / hole.r).toFixed(2)}`),
           turrets: turrets.map((t) => t.st), novas: novas.map((n) => n.st),
         };
