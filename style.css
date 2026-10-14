@@ -377,3 +377,6 @@ h2 { margin: 0; font-size: 24px; }
   pointer-events: none;
   box-shadow: 0 0 18px rgba(120, 80, 255, .25);
 }
+
+.ver { margin: 14px 0 0; font-size: 12px; opacity: .55; }
+.ver a { color: inherit; }
