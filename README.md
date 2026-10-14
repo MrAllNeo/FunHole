@@ -62,7 +62,7 @@ Küçülme bir alt sınırda durur ve seviye hiçbir zaman düşmez.
 
 ## Tempo
 
-Cisimler seyrek ve aralarında mesafe var (agar.io gibi); büyümek zaman alır, oyun uzun soluklu. Ortalama bir tur 10 dakikadan uzun sürer.
+Cisimler seyrek ve aralarında mesafe var (agar.io gibi); büyümek zaman alır, oyun uzun soluklu.
 
 ## Altın cisimler ve uzay olayları
 
