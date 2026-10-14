@@ -17,8 +17,10 @@ Kurulum gerektirmez: saf HTML + Canvas + JavaScript, harici kütüphane veya gö
 
 | Platform | Kontrol |
 |----------|---------|
-| Masaüstü | Fare imlecine doğru gider (WASD / ok tuşları da çalışır) |
-| Mobil    | Ekranın herhangi bir yerine dokunup sürükle (sanal joystick) |
+| Masaüstü | Fare imlecine doğru gider (WASD / ok tuşları da çalışır). **Tıkla** ya da **Space**: atıl |
+| Mobil    | Ekranın herhangi bir yerine dokunup sürükle (sanal joystick). **⚡ ATIL** butonu ya da ikinci parmak: atıl |
+
+Atılma kısa süreli büyük bir hız patlamasıdır; 5 saniyede bir dolar. Rakipten kaçmak, kaçan rakibi ya da altın cismi yakalamak için kullan.
 
 ## Seviyeler
 
@@ -54,9 +56,30 @@ Her rakibin bir adı ve kendi renkli diski var (Vakum, Kara Kurt, Obur, Girdap�
 |---------|----------|--------------------|
 | Lazer uydu (2. seviyeden itibaren) | Kırmızı kesikli çizgiyle nişan alır, sonra ateş eder; vurursa %15 küçülürsün | Çizgiden çekil; büyüyünce yut (bonus puan) |
 | Süpernova (3. seviyeden itibaren) | Geri sayar, patlama dalgası seni küçültür ve savurur | Halkanın dışına çık ya da patlamadan önce yut |
-| Hawking ışıması | 3 saniye bir şey yemezsen buharlaşıp küçülürsün | Durmadan ye |
+| Hawking ışıması | 6 saniye bir şey yemezsen buharlaşıp küçülürsün | Durmadan ye |
 
 Küçülme bir alt sınırda durur ve seviye hiçbir zaman düşmez.
+
+## Tempo
+
+Cisimler seyrek ve aralarında mesafe var (agar.io gibi); büyümek zaman alır, oyun uzun soluklu. Ortalama bir tur 10 dakikadan uzun sürer.
+
+## Altın cisimler ve uzay olayları
+
+- **Altın cisimler** (Uzay Kedisi, Kayıp Tesla, Voyager Sondası, Lastik Ördek…): ara sıra belirir, senden kaçar ve 22 saniye sonra kaybolur. Yakalarsan normalin 4 katı kütle ve 25 kat puan. Ekran kenarında altın okla gösterilir.
+- **Meteor yağmuru:** 10 saniye boyunca ekrana yem yağar.
+- **Kara madde bulutu:** içinde %60 yavaşlarsın (rakipler de), ama içi yem doludur.
+- **Solucan deliği:** içine girersen uzayın uzak bir köşesine ışınlanırsın; rakipler geride kalır, çıkışta yem bulursun.
+
+## Görevler, görünümler ve ansiklopedi
+
+- Ana menüde sıradaki 3 görev görünür (toplam 12). Bazı görevler yeni **kara delik görünümü** açar: Mor Girdap, Altın, Kızıl Lazer, Buz, Zehir, Gökkuşağı.
+- **Uzay Ansiklopedisi:** yuttuğun her cisim tipi koleksiyona eklenir (33 kayıt, nadirler dahil).
+- İlerleme tarayıcıda (localStorage) saklanır.
+
+## Müzik
+
+Arkada WebAudio ile üretilen bir uzay müziği çalar; seviye yükseldikçe temposu ve yoğunluğu artar. 🎵 düğmesiyle müziği, 🔊 ile tüm sesi kapatabilirsin.
 
 ## Dosyalar
 
@@ -64,4 +87,4 @@ Küçülme bir alt sınırda durur ve seviye hiçbir zaman düşmez.
 - `style.css` – HUD ve arayüz
 - `js/game.js` – oyun döngüsü, çizim, girdi, ses (WebAudio ile sentez)
 
-Geliştirme için `index.html?debug` açılırsa konsolda `FunHole.grow(50)` ile anında büyüyebilir, `FunHole.rival(1.5, 0.6)`, `FunHole.turret(0.5)`, `FunHole.nova()` ile rakip ve tehlike çağırabilirsin.
+Geliştirme için `index.html?debug` açılırsa konsolda `FunHole.grow(50)` ile anında büyüyebilir, `FunHole.rival(1.5, 0.6)`, `FunHole.turret(0.5)`, `FunHole.nova()`, `FunHole.rare()`, `FunHole.event('meteor' | 'cloud' | 'worm')` ile rakip, tehlike ve olay çağırabilirsin.

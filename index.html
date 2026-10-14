@@ -21,11 +21,14 @@
       <div id="score">0</div>
       <div id="timer">0:00</div>
     </div>
-    <button id="muteBtn" aria-label="Ses">🔊</button>
+    <button id="musicBtn" class="hudBtn" aria-label="Müzik">🎵</button>
+    <button id="muteBtn" class="hudBtn" aria-label="Ses">🔊</button>
+    <button id="dashBtn" class="ready" aria-label="Atıl">⚡<small>ATIL</small></button>
   </div>
 
   <div id="combo"></div>
   <div id="warn"></div>
+  <div id="toast"></div>
 
   <div id="banner">
     <div class="big">SIZE UP!</div>
@@ -38,18 +41,46 @@
       <div class="logo"></div>
       <h1>FunHole</h1>
       <p class="tag">Sen bir kara deliksin. Ye, büyü, evreni yut!</p>
-      <ul class="how">
-        <li class="only-desktop">🖱️ Fareyle yönlendir (ya da WASD / oklar)</li>
-        <li class="only-touch">👆 Ekranda parmağını sürükle</li>
-        <li>🪨 Senden küçük olan her şeyi yut, <b>SIZE UP</b> al</li>
-        <li>🔴 Kırmızı halkalılar senden büyük… şimdilik!</li>
-        <li>🕳️ Rakip kara delikler: küçükse ye, büyükse kaç!</li>
-        <li>⚡ Lazer uydular ve süpernovalar seni küçültür</li>
-        <li>☢️ Uzun süre yemezsen buharlaşırsın</li>
-        <li>🌌 Hedef: galaksileri yutup evrenin sonu olmak</li>
-      </ul>
       <button id="startBtn" class="btn">BAŞLA</button>
       <p id="best"></p>
+
+      <div class="section">
+        <div class="sec-title">Görünüm</div>
+        <div id="skins"></div>
+      </div>
+
+      <div class="section">
+        <div class="sec-title"><span>Görevler</span><span id="missionCount"></span></div>
+        <ul id="missions"></ul>
+      </div>
+
+      <button id="codexBtn" class="btn ghost">📖 Uzay Ansiklopedisi</button>
+
+      <details id="howBox" class="how-box">
+        <summary>Nasıl oynanır?</summary>
+        <ul class="how">
+          <li class="only-desktop">🖱️ Fareyle yönlendir (ya da WASD / oklar)</li>
+          <li class="only-desktop">⚡ Tıkla ya da Space: atıl</li>
+          <li class="only-touch">👆 Ekranda parmağını sürükle</li>
+          <li class="only-touch">⚡ Atıl butonu ya da ikinci parmak: atıl</li>
+          <li>🪨 Senden küçük olan her şeyi yut, <b>SIZE UP</b> al</li>
+          <li>🔴 Kırmızı halkalılar senden büyük… şimdilik!</li>
+          <li>🕳️ Rakip kara delikler: küçükse ye, büyükse kaç!</li>
+          <li>💥 Lazer uydular ve süpernovalar seni küçültür</li>
+          <li>✨ Altın cisimler kaçar, yakalarsan büyük bonus</li>
+          <li>☄️ Meteor yağmuru, kara madde, solucan deliği</li>
+          <li>☢️ Uzun süre yemezsen buharlaşırsın</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+
+  <div id="codex" class="overlay">
+    <div class="card">
+      <h2>📖 Uzay Ansiklopedisi</h2>
+      <p class="tag" id="codexCount"></p>
+      <div id="codexGrid"></div>
+      <button id="codexClose" class="btn ghost">Kapat</button>
     </div>
   </div>
 
@@ -61,6 +92,7 @@
       <p id="winStats"></p>
       <button id="continueBtn" class="btn">Devam Et</button>
       <button id="againBtn" class="btn ghost">Yeniden Başla</button>
+      <button id="winMenuBtn" class="btn ghost">Ana Menü</button>
     </div>
   </div>
 
@@ -71,6 +103,7 @@
       <p class="tag" id="deadBy"></p>
       <p id="deadStats"></p>
       <button id="retryBtn" class="btn">Tekrar Dene</button>
+      <button id="deadMenuBtn" class="btn ghost">Ana Menü</button>
     </div>
   </div>
 

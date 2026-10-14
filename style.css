@@ -72,7 +72,7 @@ html, body {
   font-variant-numeric: tabular-nums;
 }
 
-#muteBtn {
+.hudBtn {
   pointer-events: auto;
   border: 0;
   width: 36px;
@@ -140,6 +140,7 @@ html, body {
   color: transparent;
   filter: drop-shadow(0 0 18px rgba(255, 120, 40, .7));
 }
+#banner.event .big { font-size: clamp(26px, 7.5vw, 56px); letter-spacing: 1px; }
 #banner .name { font-size: clamp(18px, 5vw, 28px); font-weight: 800; margin-top: 4px; }
 #banner .desc { font-size: clamp(13px, 3.6vw, 17px); opacity: .85; margin-top: 4px; }
 
@@ -155,6 +156,7 @@ html, body {
 .overlay {
   position: fixed;
   inset: 0;
+  z-index: 10;
   display: none;
   align-items: center;
   justify-content: center;
@@ -245,3 +247,119 @@ h1 {
   .only-touch { display: list-item; }
   .only-desktop { display: none; }
 }
+
+.hudBtn.off { opacity: .4; }
+
+/* ---------- Atılma butonu ---------- */
+#dashBtn {
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 18px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
+  width: 74px;
+  height: 74px;
+  border: 0;
+  border-radius: 50%;
+  pointer-events: auto;
+  touch-action: none;
+  color: #fff;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  background: conic-gradient(rgba(0, 0, 0, .6) calc(var(--cd, 0) * 360deg), rgba(255, 140, 50, .3) 0);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .18);
+}
+#dashBtn.ready {
+  background: rgba(255, 140, 50, .45);
+  box-shadow: 0 0 18px rgba(255, 140, 50, .7), inset 0 0 0 2px rgba(255, 220, 170, .7);
+}
+#dashBtn small { display: block; font-size: 10px; font-weight: 900; letter-spacing: 1px; margin-top: 2px; }
+
+/* ---------- Bildirimler ---------- */
+#toast {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 88px);
+  left: 50%;
+  z-index: 20;
+  max-width: min(92vw, 420px);
+  padding: 10px 16px;
+  border-radius: 14px;
+  background: rgba(20, 14, 40, .9);
+  border: 1px solid rgba(255, 255, 255, .14);
+  font-weight: 700;
+  font-size: 14px;
+  text-align: center;
+  white-space: pre-line;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -10px);
+  transition: opacity .25s, transform .25s;
+}
+#toast.show { opacity: 1; transform: translate(-50%, 0); }
+#toast.good { border-color: rgba(125, 255, 160, .55); }
+#toast.gold { border-color: rgba(255, 211, 107, .75); color: #ffe7a8; }
+
+/* ---------- Ana menü bölümleri ---------- */
+.section { margin-top: 18px; text-align: left; }
+.sec-title {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  opacity: .7;
+}
+#skins { display: flex; flex-wrap: wrap; gap: 8px; }
+.skin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 62px;
+  padding: 7px 2px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  background: rgba(255, 255, 255, .04);
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+.skin i { position: relative; width: 30px; height: 30px; border-radius: 50%; background: var(--c); }
+.skin i::after { content: ''; position: absolute; inset: 24%; border-radius: 50%; background: #000; }
+.skin.on { border-color: #ffd36b; background: rgba(255, 211, 107, .14); }
+.skin.locked i { filter: grayscale(1) brightness(.45); }
+
+#missions { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; font-size: 14px; }
+#missions li { padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, .05); }
+#missions li::before { content: '◻ '; opacity: .6; }
+#missions em { font-style: normal; font-size: 12px; color: #ffd36b; }
+
+.how-box { margin-top: 10px; text-align: left; }
+.how-box summary { cursor: pointer; font-weight: 800; opacity: .85; padding: 8px 0; }
+.how-box .how { margin: 4px 0 0; }
+
+/* ---------- Ansiklopedi ---------- */
+#codex .card { max-width: 560px; }
+h2 { margin: 0; font-size: 24px; }
+#codexGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.cx {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .05);
+  font-size: 11px;
+  text-align: center;
+}
+.cx canvas { width: 52px; height: 52px; }
+.cx.locked canvas { filter: brightness(0); opacity: .35; }
+.cx.locked span { opacity: .5; }
+.cx.rare { box-shadow: inset 0 0 0 1px rgba(255, 211, 107, .5); }
